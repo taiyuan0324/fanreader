@@ -37,59 +37,6 @@ enum Paginator {
     }
 }
 
-/// 用 CoreText 绘制单页:视觉与分页算法同源,不会出现"最后一页溢出"。
-final class CoreTextPageView: UIView {
-    var attributedText: NSAttributedString? {
-        didSet { setNeedsDisplay() }
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        isOpaque = false
-        contentMode = .redraw
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        backgroundColor = .clear
-        isOpaque = false
-    }
-
-    override func draw(_ rect: CGRect) {
-        guard let context = UIGraphicsGetCurrentContext(),
-              let text = attributedText,
-              text.length > 0 else { return }
-
-        context.textMatrix = .identity
-        context.translateBy(x: 0, y: bounds.height)
-        context.scaleBy(x: 1, y: -1)
-
-        let path = CGPath(rect: CGRect(origin: .zero, size: bounds.size), transform: nil)
-        let framesetter = CTFramesetterCreateWithAttributedString(text)
-        let frame = CTFramesetterCreateFrame(framesetter,
-                                             CFRange(location: 0, length: 0),
-                                             path, nil)
-        CTFrameDraw(frame, context)
-    }
-}
-
-struct CoreTextPage: UIViewRepresentable {
-    let attributedText: NSAttributedString
-
-    func makeUIView(context: Context) -> CoreTextPageView {
-        let view = CoreTextPageView()
-        view.attributedText = attributedText
-        return view
-    }
-
-    func updateUIView(_ uiView: CoreTextPageView, context: Context) {
-        if uiView.attributedText !== attributedText {
-            uiView.attributedText = attributedText
-        }
-    }
-}
-
 /// 上下滚动模式:整章一个可滚动文本视图,属性与分页模式一致。
 struct ScrollChapterView: UIViewRepresentable {
     let attributedText: NSAttributedString
@@ -134,6 +81,7 @@ struct ScrollChapterView: UIViewRepresentable {
 
 /// 用 CoreText 自绘单页:排版与分页算法同源,不会错位;
 /// 高亮按行矩形填充,双击用 CTLine 反查字符下标。
+
 final class CoreTextPageView: UIView {
     var attributedText: NSAttributedString? {
         didSet { rebuild() }
