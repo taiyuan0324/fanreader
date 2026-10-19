@@ -15,6 +15,8 @@ struct SpeechConfig {
 final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published private(set) var isSpeaking = false
     @Published private(set) var activeEngine: String = ""
+    /// 当前朗读进度,如 "第 3/12 段"
+    @Published private(set) var progressText: String = ""
 
     var onPageFinished: (() -> Void)?
     var onError: ((Error) -> Void)?
@@ -41,6 +43,11 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
                     self.speakWithSystem(text, rate: rate, voiceID: config.systemVoiceID)
                 }
             }
+            OnlineSpeechReader.shared.onChunk = { [weak self] index, total in
+                Task { @MainActor in
+                    self?.progressText = "第 \(index)/\(total) 段"
+                }
+            }
             OnlineSpeechReader.shared.play(sentences: SpeechChunking.chunks(text, providerKind: config.providerKind),
                                            provider: provider,
                                            voice: config.voice,
@@ -63,6 +70,7 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
         }
         isSpeaking = false
         activeEngine = ""
+        progressText = ""
     }
 
     // MARK: - 系统语音

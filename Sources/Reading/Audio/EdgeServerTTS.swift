@@ -9,23 +9,27 @@ struct EdgeServerTTSProvider: TTSProvider {
     let token: String
 
     func synthesize(_ request: TTSRequest) async throws -> Data {
-        guard var components = URLComponents(string: normalizedBase + "/api/synthesis") else {
-            throw TTSError.badURL
-        }
-
-        let ratePercent = Int((request.rate - 0.5) * 100)
-        var items = [
-            URLQueryItem(name: "text", value: request.text),
-            URLQueryItem(name: "voiceName", value: request.voice.isEmpty ? "zh-CN-XiaoxiaoNeural" : request.voice),
-            URLQueryItem(name: "rate", value: ratePercent >= 0 ? "+\(ratePercent)%" : "\(ratePercent)%"),
-            URLQueryItem(name: "format", value: "audio-24khz-48kbitrate-mono-mp3")
+        // 注意:`+20%` 里的 `+` 必须编码成 %2B。
+        // 服务端按 application/x-www-form-urlencoded 解析,裸 `+` 会变成空格,导致 bad rate。
+        let ratePercent = Int(((request.rate - 0.5) * 100).rounded())
+        var pairs: [(String, String)] = [
+            ("text", request.text),
+            ("voiceName", request.voice.isEmpty ? "zh-CN-XiaoxiaoNeural" : request.voice),
+            ("rate", ratePercent >= 0 ? "+\(ratePercent)%" : "\(ratePercent)%"),
+            ("pitch", "+0Hz"),
+            ("volume", "+0%"),
+            ("format", "audio-24khz-48kbitrate-mono-mp3")
         ]
         if !token.isEmpty {
-            items.append(URLQueryItem(name: "token", value: token))
+            pairs.append(("token", token))
         }
-        components.queryItems = items
 
-        guard let url = components.url else { throw TTSError.badURL }
+        let query = pairs
+            .map { "\($0.0)=\(Self.encode($0.1))" }
+            .joined(separator: "&")
+        guard let url = URL(string: normalizedBase + "/api/synthesis?" + query) else {
+            throw TTSError.badURL
+        }
 
         var urlRequest = URLRequest(url: url)
         urlRequest.timeoutInterval = 45
@@ -53,11 +57,8 @@ struct EdgeServerTTSProvider: TTSProvider {
         while base.hasSuffix("/") { base.removeLast() }
         if !base.hasPrefix("http://") && !base.hasPrefix("https://") { base = "http://" + base }
 
-        guard var components = URLComponents(string: base + "/api/voices") else { throw TTSError.badURL }
-        if !token.isEmpty {
-            components.queryItems = [URLQueryItem(name: "token", value: token)]
-        }
-        guard let url = components.url else { throw TTSError.badURL }
+        let suffix = token.isEmpty ? "" : "?token=\(encode(token))"
+        guard let url = URL(string: base + "/api/voices" + suffix) else { throw TTSError.badURL }
 
         var urlRequest = URLRequest(url: url)
         urlRequest.timeoutInterval = 15
@@ -72,6 +73,13 @@ struct EdgeServerTTSProvider: TTSProvider {
             throw TTSError.message("音色列表格式不对,确认是 edge-tts-server")
         }
         return list
+    }
+
+    /// RFC3986 严格编码:`+`、`%`、空格等一律转义
+    static func encode(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 
     private var normalizedBase: String {

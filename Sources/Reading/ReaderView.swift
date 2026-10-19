@@ -82,6 +82,7 @@ struct ReaderView: View {
         case .ready:
             if let pdf = model.pdfDocument {
                 PDFKitView(document: pdf, pageIndex: $model.pdfPageIndex)
+                    .highPriorityGesture(TapGesture(count: 2).onEnded { toggleSpeech() })
                     .padding(.vertical, 44)
                     .onChange(of: model.pdfPageIndex) { _ in persist() }
             } else if settings.pageMode == .scroll {
@@ -106,6 +107,9 @@ struct ReaderView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            .highPriorityGesture(
+                TapGesture(count: 2).onEnded { toggleSpeech() }
+            )
             .padding(.horizontal, settings.margin)
             .padding(.top, settings.showHeaderFooter ? headerHeight + 10 : 12)
             .padding(.bottom, settings.showHeaderFooter ? footerHeight + 6 : 12)
@@ -286,7 +290,7 @@ struct ReaderView: View {
 
                 Spacer()
 
-                Text(pageLabel)
+                Text(speech.isSpeaking && !speech.progressText.isEmpty ? speech.progressText : pageLabel)
                     .font(.caption2)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)

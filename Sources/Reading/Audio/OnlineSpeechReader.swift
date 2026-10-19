@@ -13,6 +13,8 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
 
     private(set) var isPlaying = false
     var onError: ((Error) -> Void)?
+    /// 每块开始播放时回调(当前序号, 总数),用于显示朗读进度
+    var onChunk: ((Int, Int) -> Void)?
 
     // MARK: - 播放整页
 
@@ -26,25 +28,48 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
             guard let self else { return }
             await self.activateSession()
 
+            var prefetched: Task<Data, Error>?
+
             for (index, sentence) in sentences.enumerated() {
                 if Task.isCancelled { break }
+                let data: Data
                 do {
-                    let data = try await provider.synthesize(TTSRequest(text: sentence,
+                    if let prefetched {
+                        data = try await prefetched.value
+                    } else {
+                        data = try await provider.synthesize(TTSRequest(text: sentence,
                                                                         rate: rate,
                                                                         voice: voice))
-                    if Task.isCancelled { break }
-                    await self.playAudio(data)
-                } catch {
-                    if !Task.isCancelled {
-                        self.onError?(error)
                     }
+                } catch {
+                    if !Task.isCancelled { self.onError?(error) }
+                    prefetched?.cancel()
                     self.finish()
                     return
                 }
+
+                // 播放当前块的同时，后台预取下一块，减少翻页/连续朗读的停顿
+                if index + 1 < sentences.count {
+                    let next = sentences[index + 1]
+                    prefetched = Task {
+                        try await provider.synthesize(TTSRequest(text: next, rate: rate, voice: voice))
+                    }
+                } else {
+                    prefetched = nil
+                }
+
+                if Task.isCancelled {
+                    prefetched?.cancel()
+                    break
+                }
+                self.onChunk?(index + 1, sentences.count)
+                await self.playAudio(data)
+
                 if index == sentences.count - 1 {
                     onPageFinished()
                 }
             }
+            prefetched?.cancel()
             self.finish()
         }
     }
