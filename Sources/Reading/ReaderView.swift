@@ -18,6 +18,7 @@ struct ReaderView: View {
     @State private var showThemeQuickBar = false
     @State private var scrollOffset: CGFloat = 0
     @State private var speechError: String?
+    @State private var lastLoggedChunk = ""
 
     private let headerHeight: CGFloat = 26
     private let footerHeight: CGFloat = 26
@@ -40,6 +41,7 @@ struct ReaderView: View {
         .onDisappear { persist() }
         .onChange(of: speech.currentChunk) { chunk in
             followSpeechChunk(chunk)
+            logChunkMatch(chunk)
         }
         .sheet(isPresented: $showPanel) {
             ReaderPanelView(model: model, bookID: model.book.id)
@@ -301,7 +303,7 @@ struct ReaderView: View {
 
                 Spacer()
 
-                Text(speech.isSpeaking && !speech.progressText.isEmpty ? speech.progressText : pageLabel)
+                Text(speechLabel)
                     .font(.caption2)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
@@ -367,6 +369,18 @@ struct ReaderView: View {
         .background(.ultraThinMaterial)
     }
 
+    /// 底栏文案:朗读中显示进度 + 是否已定位到正文
+    private var speechLabel: String {
+        guard speech.isSpeaking, !speech.progressText.isEmpty else { return pageLabel }
+        return highlightMatched ? "\(speech.progressText) · 已定位" : "\(speech.progressText) · 定位中"
+    }
+
+    private var highlightMatched: Bool {
+        guard speech.isSpeaking, !speech.currentChunk.isEmpty,
+              model.pages.indices.contains(model.pageIndex) else { return false }
+        return Self.range(of: speech.currentChunk, in: model.pages[model.pageIndex].string) != nil
+    }
+
     private var pageLabel: String {
         if model.isPDF || settings.pageMode == .slide {
             return "\(model.currentPageNumber)/\(max(model.pageCount, 1))"
@@ -390,29 +404,71 @@ struct ReaderView: View {
         return Self.range(of: speech.currentChunk, in: model.pages[pageIndex].string)
     }
 
-    static func range(of chunk: String, in pageText: String) -> NSRange? {
-        let text = pageText as NSString
-        guard text.length > 0, !chunk.isEmpty else { return nil }
-
-        let direct = text.range(of: chunk)
-        if direct.location != NSNotFound { return direct }
-
-        // 空格 ↔ 换行/多空格
-        let escaped = NSRegularExpression.escapedPattern(for: chunk)
-            .replacingOccurrences(of: "\\ ", with: "\\s+")
-        if let regex = try? NSRegularExpression(pattern: escaped),
-           let match = regex.firstMatch(in: pageText,
-                                        range: NSRange(location: 0, length: text.length)) {
-            return match.range
-        }
-
-        // 再退一步:用前 10 个字定位
-        let prefix = String(chunk.prefix(10))
-        let loose = text.range(of: prefix)
-        return loose.location == NSNotFound ? nil : loose
+    private struct NormalizedText {
+        let text: String
+        /// 规范化字符 → 原文中的字符偏移
+        let offsets: [Int]
     }
 
-    /// 朗读跨页时自动跟到下一页
+    /// 把连续空白压成一个空格,并记录每个字符回到原文的偏移。
+    /// 分句时换行被替换成空格,所以两侧必须规范化后再比对。
+    private static func normalize(_ source: String) -> NormalizedText {
+        var result = ""
+        var offsets: [Int] = []
+        var pendingSpace = false
+        var index = 0
+
+        for character in source {
+            if character.isWhitespace {
+                if !result.isEmpty, !pendingSpace {
+                    result.append(" ")
+                    offsets.append(index)
+                    pendingSpace = true
+                }
+            } else {
+                result.append(character)
+                offsets.append(index)
+                pendingSpace = false
+            }
+            index += 1
+        }
+        return NormalizedText(text: result, offsets: offsets)
+    }
+
+    static func range(of chunk: String, in pageText: String) -> NSRange? {
+        guard !chunk.isEmpty, !pageText.isEmpty else { return nil }
+
+        if let direct = pageText.range(of: chunk) {
+            return NSRange(direct, in: pageText)
+        }
+
+        let page = normalize(pageText)
+        let needle = normalize(chunk).text
+        guard !needle.isEmpty, let found = page.text.range(of: needle) else { return nil }
+
+        let startNorm = page.text.distance(from: page.text.startIndex, to: found.lowerBound)
+        let endNorm = page.text.distance(from: page.text.startIndex, to: found.upperBound)
+        guard startNorm < page.offsets.count else { return nil }
+
+        let startChar = page.offsets[startNorm]
+        let endChar = endNorm < page.offsets.count ? page.offsets[endNorm] : pageText.count
+        guard startChar < endChar else { return nil }
+
+        let lower = pageText.index(pageText.startIndex, offsetBy: startChar)
+        let upper = pageText.index(pageText.startIndex, offsetBy: min(endChar, pageText.count))
+        guard lower < upper else { return nil }
+        return NSRange(lower..<upper, in: pageText)
+    }
+
+    /// 把片段匹配情况写进导入日志,方便定位"高亮不跟随"
+    private func logChunkMatch(_ chunk: String) {
+        guard !chunk.isEmpty, chunk != lastLoggedChunk else { return }
+        lastLoggedChunk = chunk
+        let matched = model.pages.indices.contains(model.pageIndex)
+            && Self.range(of: chunk, in: model.pages[model.pageIndex].string) != nil
+        ImportLog.write("speech chunk \(chunk.count)字 page=\(model.pageIndex) matched=\(matched)")
+    }
+
     private func followSpeechChunk(_ chunk: String) {
         guard speech.isSpeaking, !chunk.isEmpty, !model.isPDF else { return }
         if model.pages.indices.contains(model.pageIndex),
