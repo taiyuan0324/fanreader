@@ -215,7 +215,8 @@ final class ReadingSettings: ObservableObject {
         firstLineIndent = defaults.object(forKey: Key.indent.rawValue) as? Double ?? 2
         margin = defaults.object(forKey: Key.margin.rawValue) as? Double ?? 22
         fontFamily = ReaderFontFamily(rawValue: defaults.string(forKey: Key.fontFamily.rawValue) ?? "") ?? .system
-        alignment = ReaderTextAlignment(rawValue: defaults.string(forKey: Key.alignment.rawValue) ?? "") ?? .leading
+        // 默认两端对齐:中文正文左右齐平,观感比左对齐整齐
+        alignment = ReaderTextAlignment(rawValue: defaults.string(forKey: Key.alignment.rawValue) ?? "") ?? .justified
         pageMode = ReaderPageMode(rawValue: defaults.string(forKey: Key.pageMode.rawValue) ?? "") ?? .slide
         showHeaderFooter = defaults.object(forKey: Key.showChrome.rawValue) as? Bool ?? true
         speechRateMultiplier = defaults.object(forKey: Key.speechRate.rawValue) as? Double ?? 1.0
