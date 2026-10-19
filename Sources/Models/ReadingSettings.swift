@@ -219,7 +219,7 @@ final class ReadingSettings: ObservableObject {
         pageMode = ReaderPageMode(rawValue: defaults.string(forKey: Key.pageMode.rawValue) ?? "") ?? .slide
         showHeaderFooter = defaults.object(forKey: Key.showChrome.rawValue) as? Bool ?? true
         speechRateMultiplier = defaults.object(forKey: Key.speechRate.rawValue) as? Double ?? 1.0
-        prefetchCount = defaults.object(forKey: Key.prefetch.rawValue) as? Double ?? 6
+        prefetchCount = defaults.object(forKey: Key.prefetch.rawValue) as? Double ?? 10
         autoTurnPageOnSpeech = defaults.object(forKey: Key.autoTurn.rawValue) as? Bool ?? true
     }
 

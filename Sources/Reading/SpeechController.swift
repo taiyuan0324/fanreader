@@ -69,9 +69,9 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
                 }
             }
 
-            // 豆包是浏览器端逐个合成,并发一高就触发限流→服务端降级成微软
+            // 豆包是浏览器端逐个合成:单并发串行请求,靠"多预取几段"换流畅,而不是靠并发
             let parallel = config.providerKind == .doubao ? 1 : 3
-            let ahead = config.providerKind == .doubao ? min(config.prefetch, 3) : config.prefetch
+            let ahead = config.prefetch
 
             OnlineSpeechReader.shared.play(chunks: chunks,
                                            provider: provider,
