@@ -43,9 +43,8 @@ struct ReaderView: View {
         .preferredColorScheme(colorScheme)
         .task { await model.load() }
         .onDisappear { persist() }
-        .onChange(of: speech.currentChunk) { chunk in
-            followSpeechChunk(chunk)
-            logChunkMatch(chunk)
+        .onChange(of: speech.currentRange) { _ in
+            followCurrentRange()
         }
         .sheet(isPresented: $showPanel) {
             ReaderPanelView(model: model, bookID: model.book.id)
@@ -115,7 +114,7 @@ struct ReaderView: View {
                 ForEach(Array(model.pages.enumerated()), id: \.offset) { index, page in
                     CoreTextPage(
                         attributedText: page,
-                        highlightRange: highlightRange(pageIndex: index),
+                        highlightRange: localHighlight(pageIndex: index),
                         highlightColor: highlightColor,
                         onSingleTap: { fraction in
                             if fraction < 0.3 {
@@ -469,16 +468,10 @@ struct ReaderView: View {
         .background(.ultraThinMaterial)
     }
 
-    /// 底栏文案:朗读中显示进度 + 是否已定位到正文
+    /// 底栏文案:朗读中显示进度
     private var speechLabel: String {
         guard speech.isSpeaking, !speech.progressText.isEmpty else { return pageLabel }
-        return highlightMatched ? "\(speech.progressText) · 已定位" : "\(speech.progressText) · 定位中"
-    }
-
-    private var highlightMatched: Bool {
-        guard speech.isSpeaking, !speech.currentChunk.isEmpty,
-              model.pages.indices.contains(model.pageIndex) else { return false }
-        return Self.range(of: speech.currentChunk, in: model.pages[model.pageIndex].string) != nil
+        return speech.progressText
     }
 
     private var pageLabel: String {
@@ -496,108 +489,26 @@ struct ReaderView: View {
                     : UIColor.systemYellow.withAlphaComponent(0.34)
     }
 
-    /// 当前朗读片段在本页的区间。
-    /// 分句时把换行换成了空格,所以这里要容忍空白差异,否则永远匹配不上。
-    private func highlightRange(pageIndex: Int) -> NSRange? {
-        guard speech.isSpeaking, !speech.currentChunk.isEmpty,
-              model.pages.indices.contains(pageIndex) else { return nil }
-        return Self.range(of: speech.currentChunk, in: model.pages[pageIndex].string)
+    /// 当前朗读块在本页的高亮区间(绝对区间裁剪到本页)
+    private func localHighlight(pageIndex: Int) -> NSRange? {
+        guard speech.isSpeaking, let range = speech.currentRange else { return nil }
+        return model.localRange(forPage: pageIndex, absolute: range)
     }
 
-    private struct NormalizedText {
-        let text: String
-        /// 规范化字符 → 原文中的字符偏移
-        let offsets: [Int]
-    }
-
-    /// 把连续空白压成一个空格,并记录每个字符回到原文的偏移。
-    /// 分句时换行被替换成空格,所以两侧必须规范化后再比对。
-    private static func normalize(_ source: String) -> NormalizedText {
-        var result = ""
-        var offsets: [Int] = []
-        var pendingSpace = false
-        var index = 0
-
-        for character in source {
-            if character.isWhitespace {
-                if !result.isEmpty, !pendingSpace {
-                    result.append(" ")
-                    offsets.append(index)
-                    pendingSpace = true
-                }
-            } else {
-                result.append(character)
-                offsets.append(index)
-                pendingSpace = false
-            }
-            index += 1
-        }
-        return NormalizedText(text: result, offsets: offsets)
-    }
-
-    static func range(of chunk: String, in pageText: String) -> NSRange? {
-        guard !chunk.isEmpty, !pageText.isEmpty else { return nil }
-
-        if let direct = pageText.range(of: chunk) {
-            return NSRange(direct, in: pageText)
-        }
-
-        let page = normalize(pageText)
-        let needle = normalize(chunk).text
-        guard !needle.isEmpty, let found = page.text.range(of: needle) else { return nil }
-
-        let startNorm = page.text.distance(from: page.text.startIndex, to: found.lowerBound)
-        let endNorm = page.text.distance(from: page.text.startIndex, to: found.upperBound)
-        guard startNorm < page.offsets.count else { return nil }
-
-        let startChar = page.offsets[startNorm]
-        let endChar = endNorm < page.offsets.count ? page.offsets[endNorm] : pageText.count
-        guard startChar < endChar else { return nil }
-
-        let lower = pageText.index(pageText.startIndex, offsetBy: startChar)
-        let upper = pageText.index(pageText.startIndex, offsetBy: min(endChar, pageText.count))
-        guard lower < upper else { return nil }
-        return NSRange(lower..<upper, in: pageText)
-    }
-
-    /// 把片段匹配情况写进导入日志,方便定位"高亮不跟随"
-    private func logChunkMatch(_ chunk: String) {
-        guard !chunk.isEmpty, chunk != lastLoggedChunk else { return }
-        lastLoggedChunk = chunk
-        let matched = model.pages.indices.contains(model.pageIndex)
-            && Self.range(of: chunk, in: model.pages[model.pageIndex].string) != nil
-        ImportLog.write("speech chunk \(chunk.count)字 page=\(model.pageIndex) matched=\(matched)")
-    }
-
-    private func followSpeechChunk(_ chunk: String) {
-        guard speech.isSpeaking, !chunk.isEmpty, !model.isPDF else { return }
-        if model.pages.indices.contains(model.pageIndex),
-           Self.range(of: chunk, in: model.pages[model.pageIndex].string) != nil {
-            return
-        }
-        guard model.pageIndex + 1 < model.pages.count else { return }
-        for index in (model.pageIndex + 1)..<model.pages.count {
-            if Self.range(of: chunk, in: model.pages[index].string) != nil {
-                model.pageIndex = index
-                return
-            }
+    /// 朗读跨页时自动翻到对应页
+    private func followCurrentRange() {
+        guard speech.isSpeaking, !model.isPDF, let range = speech.currentRange else { return }
+        guard let page = model.pageIndex(containing: range.location) else { return }
+        if page != model.pageIndex {
+            model.pageIndex = page
         }
     }
 
-    /// 双击定位:从本页第 charIndex 个字符开始朗读
+    /// 双击:从本页第 charIndex 个字符所在位置开始朗读
     private func startSpeech(fromPage page: Int, charIndex: Int) {
         guard isListening else { return }
-        speech.stop()
-        guard model.pages.indices.contains(page) else { return }
-        if model.pageIndex != page { model.pageIndex = page }
-
-        let string = model.pages[page].string as NSString
-        guard string.length > 0 else { return }
-        let clamped = min(max(charIndex, 0), string.length - 1)
-        var remainder = string.substring(from: clamped)
-        remainder = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !remainder.isEmpty else { return }
-        speak(remainder)
+        guard let absolute = model.absoluteOffset(pageIndex: page, charIndex: charIndex) else { return }
+        speakChapter(from: absolute)
     }
 
     /// 滑到首/尾的占位页时切换到相邻章节
@@ -647,10 +558,47 @@ struct ReaderView: View {
             isListening = false
         } else {
             isListening = true
-            if let text = model.textForSpeech() {
-                speak(text)
-            }
+            speakChapter(from: currentPageStartOffset)
         }
+    }
+
+    private var currentPageStartOffset: Int {
+        model.pageRanges.indices.contains(model.pageIndex) ? model.pageRanges[model.pageIndex].location : 0
+    }
+
+    /// 从章节绝对偏移开始朗读,整章连读(预缓存跨页连续)
+    private func speakChapter(from offset: Int) {
+        let text = model.chapterText
+        guard !text.isEmpty else { return }
+
+        speech.onError = { error in
+            speechError = error.localizedDescription
+        }
+        speech.onChapterFinished = { [weak controller] in
+            guard let controller,
+                  settings.autoTurnPageOnSpeech,
+                  model.chapterIndex + 1 < model.chapterCount else { return }
+            model.nextChapter()
+            controller.speakChapter(model.chapterText,
+                                    from: 0,
+                                    config: SpeechConfig(onlineProvider: tts.provider,
+                                                         voice: tts.voice,
+                                                         systemVoiceID: tts.systemVoice,
+                                                         providerKind: tts.kind,
+                                                         providerName: tts.kind == .system ? "系统" : tts.kind.name,
+                                                         prefetch: Int(settings.prefetchCount),
+                                                         multiplier: settings.normalizedMultiplier))
+        }
+
+        speech.speakChapter(text,
+                            from: offset,
+                            config: SpeechConfig(onlineProvider: tts.provider,
+                                                 voice: tts.voice,
+                                                 systemVoiceID: tts.systemVoice,
+                                                 providerKind: tts.kind,
+                                                 providerName: tts.kind == .system ? "系统" : tts.kind.name,
+                                                 prefetch: Int(settings.prefetchCount),
+                                                 multiplier: settings.normalizedMultiplier))
     }
 
     private func relayout(pageSize: CGSize) {
@@ -668,45 +616,7 @@ struct ReaderView: View {
             return
         }
         guard isListening else { return }
-        guard let text = model.textForSpeech() else { return }
-        speak(text)
-    }
-
-    /// 统一入口:配置回调 + 起播。听书按钮、播放按钮、双击定位都走这里
-    private func speak(_ text: String) {
-        let reader = model
-        let preferences = settings
-        let speechSettings = tts
-        let controller = speech
-
-        speech.onError = { error in
-            speechError = error.localizedDescription
-        }
-        speech.onPageFinished = { [weak controller] in
-            guard let controller, preferences.autoTurnPageOnSpeech else { return }
-            let beforePage = reader.pageIndex
-            let beforeChapter = reader.chapterIndex
-            reader.nextPage()
-            guard reader.pageIndex != beforePage || reader.chapterIndex != beforeChapter,
-                  let next = reader.textForSpeech() else { return }
-            controller.speak(next, config: SpeechConfig(
-                onlineProvider: speechSettings.provider,
-                voice: speechSettings.voice,
-                systemVoiceID: speechSettings.systemVoice,
-                providerKind: speechSettings.kind,
-                providerName: speechSettings.kind == .system ? "系统" : speechSettings.kind.name,
-                prefetch: Int(preferences.prefetchCount),
-                multiplier: preferences.normalizedMultiplier))
-        }
-
-        let config = SpeechConfig(onlineProvider: tts.provider,
-                                  voice: tts.voice,
-                                  systemVoiceID: tts.systemVoice,
-                                  providerKind: tts.kind,
-                                  providerName: tts.kind == .system ? "系统" : tts.kind.name,
-                                  prefetch: Int(settings.prefetchCount),
-                                  multiplier: settings.normalizedMultiplier)
-        speech.speak(text, config: config)
+        speakChapter(from: currentPageStartOffset)
     }
 
     private func addBookmark() {

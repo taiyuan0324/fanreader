@@ -21,6 +21,8 @@ final class ReaderModel: ObservableObject {
     @Published private(set) var document: BookDocument?
     @Published private(set) var pdfDocument: PDFDocument?
     @Published private(set) var pages: [NSAttributedString] = []
+    /// 每页在章节文本中的绝对区间,与 pages 一一对应
+    @Published private(set) var pageRanges: [NSRange] = []
     @Published var chapterIndex = 0
     @Published var pageIndex = 0
     @Published var pdfPageIndex = 0
@@ -138,15 +140,36 @@ final class ReaderModel: ObservableObject {
         layoutAttributes = attributes
         cachedChapterText = chapter.text
 
-        pages = paginate(chapter: chapter, attributes: attributes, size: size)
+        rebuildPages(chapter: chapter, attributes: attributes, size: size)
         pageIndex = keepPage ? min(previous, max(pages.count - 1, 0)) : 0
     }
 
-    private func paginate(chapter: Chapter,
-                          attributes: [NSAttributedString.Key: Any],
-                          size: CGSize) -> [NSAttributedString] {
+    private func rebuildPages(chapter: Chapter,
+                              attributes: [NSAttributedString.Key: Any],
+                              size: CGSize) {
         let attributed = NSAttributedString(string: chapter.text, attributes: attributes)
-        return Paginator.pages(attributed: attributed, size: size)
+        let ranges = Paginator.ranges(attributed: attributed, size: size)
+        let full = chapter.text as NSString
+
+        pageRanges = ranges
+        pages = ranges.enumerated().map { index, range in
+            var slice = NSMutableAttributedString(attributedString: attributed.attributedSubstring(from: range))
+
+            // 续页(不是段落开头)去掉首行缩进,否则一段话被分页后会看起来像两段
+            if range.location > 0 {
+                let previous = full.substring(with: NSRange(location: range.location - 1, length: 1))
+                if previous != "\n" {
+                    let whole = NSRange(location: 0, length: slice.length)
+                    slice.enumerateAttribute(.paragraphStyle, in: whole) { value, attrRange, _ in
+                        guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+                        style.firstLineHeadIndent = 0
+                        slice.addAttribute(.paragraphStyle, value: style, range: attrRange)
+                    }
+                }
+            }
+            _ = index
+            return slice
+        }
     }
 
     /// 上下滚动模式不需要分页,直接给出整章富文本
@@ -198,11 +221,40 @@ final class ReaderModel: ObservableObject {
     private func rebuildPages() {
         guard let chapter = currentChapter, layoutSize != .zero, let attributes = layoutAttributes else {
             pages = []
+            pageRanges = []
             return
         }
         cachedChapterText = chapter.text
-        pages = paginate(chapter: chapter, attributes: attributes, size: layoutSize)
+        rebuildPages(chapter: chapter, attributes: attributes, size: layoutSize)
         pageIndex = min(pageIndex, max(pages.count - 1, 0))
+    }
+
+    // MARK: - 坐标映射(朗读/高亮共用)
+
+    var chapterText: String { currentChapter?.text ?? "" }
+
+    /// 页内字符下标 → 章节绝对偏移
+    func absoluteOffset(pageIndex: Int, charIndex: Int) -> Int? {
+        guard pageRanges.indices.contains(pageIndex) else { return nil }
+        let range = pageRanges[pageIndex]
+        let clamped = min(max(charIndex, 0), range.length)
+        return range.location + clamped
+    }
+
+    /// 绝对偏移落在第几页
+    func pageIndex(containing offset: Int) -> Int? {
+        pageRanges.firstIndex { NSLocationInRange(offset, $0) }
+            ?? pageRanges.lastIndex { offset == $0.location + $0.length }
+    }
+
+    /// 绝对区间 → 当前页的局部区间(用于高亮)
+    func localRange(forPage index: Int, absolute: NSRange) -> NSRange? {
+        guard pageRanges.indices.contains(index) else { return nil }
+        let page = pageRanges[index]
+        let start = max(absolute.location, page.location)
+        let end = min(absolute.location + absolute.length, page.location + page.length)
+        guard start < end else { return nil }
+        return NSRange(location: start - page.location, length: end - start)
     }
 
     // MARK: - 搜索

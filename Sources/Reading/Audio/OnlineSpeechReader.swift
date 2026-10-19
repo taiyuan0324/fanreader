@@ -17,18 +17,19 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
 
     // MARK: - 播放
 
-    func play(sentences: [String],
+    func play(chunks: [SpeechChunk],
               provider: TTSProvider,
               voice: String,
               rate: Double,
               prefetch: Int,
               clientRate: Double = 1.0,
-              onPageFinished: @escaping () -> Void) {
+              onChunk: @escaping (Int, SpeechChunk) -> Void,
+              onFinished: @escaping () -> Void) {
         stop()
-        guard !sentences.isEmpty else { return }
+        guard !chunks.isEmpty else { return }
 
         let ahead = max(1, min(prefetch, 15))
-        let concurrency = 3          // 同时在跑的请求数,避免把服务打爆
+        let concurrency = 3
 
         task = Task { [weak self] in
             guard let self else { return }
@@ -38,11 +39,11 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
             var nextToStart = 0
 
             func start(upTo slot: Int) {
-                while nextToStart < sentences.count,
+                while nextToStart < chunks.count,
                       nextToStart < slot + ahead,
                       inFlight.count < concurrency {
                     let index = nextToStart
-                    let text = sentences[index]
+                    let text = chunks[index].text
                     inFlight[index] = Task {
                         try await provider.synthesize(TTSRequest(text: text, rate: rate, voice: voice))
                     }
@@ -50,7 +51,7 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
                 }
             }
 
-            for index in sentences.indices {
+            for index in chunks.indices {
                 if Task.isCancelled { break }
                 start(upTo: index)
 
@@ -59,9 +60,7 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
                 do {
                     data = try await request.value
                 } catch {
-                    if !Task.isCancelled {
-                        self.onError?(error)
-                    }
+                    if !Task.isCancelled { self.onError?(error) }
                     for pending in inFlight.values { pending.cancel() }
                     self.finish()
                     return
@@ -69,16 +68,13 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
                 inFlight[index] = nil
 
                 if Task.isCancelled { break }
-                self.onChunkText?(sentences[index])
+                onChunk(index, chunks[index])
                 await self.playAudio(data, rate: clientRate)
-
-                if index == sentences.count - 1 {
-                    onPageFinished()
-                }
             }
 
             for pending in inFlight.values { pending.cancel() }
             self.finish()
+            onFinished()
         }
     }
 

@@ -13,87 +13,124 @@ struct SpeechConfig {
     var multiplier: Double = 1.0
 }
 
-/// 朗读统一入口:在线引擎优先,失败或未配置时自动回退系统语音。
+/// 朗读统一入口。
+/// 关键点:整章按绝对偏移切块,当前朗读块用 NSRange 上报,
+/// 视图据此做高亮与翻页跟随,不再依赖字符串匹配。
 @MainActor
 final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published private(set) var isSpeaking = false
     @Published private(set) var activeEngine: String = ""
-    /// 当前朗读进度,如 "第 3/12 段"
     @Published private(set) var progressText: String = ""
-    /// 正在朗读的片段文本,供正文高亮跟随
-    @Published private(set) var currentChunk: String = ""
+    /// 当前朗读块在章节中的绝对区间
+    @Published private(set) var currentRange: NSRange?
 
-    var onPageFinished: (() -> Void)?
     var onError: ((Error) -> Void)?
+    /// 整章读完(或从起点读到底)
+    var onChapterFinished: (() -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
+
+    // 系统语音的分块队列
+    private var systemChunks: [SpeechChunk] = []
+    private var systemIndex = 0
+    private var systemActive = false
+    private var systemVoiceID = ""
+    private var systemMultiplier: Double = 1.0
 
     override init() {
         super.init()
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String, config: SpeechConfig) {
+    // MARK: - 对外
+
+    /// 从章节的 offset 开始朗读,一直读到章节末尾
+    func speakChapter(_ text: String, from offset: Int, config: SpeechConfig) {
         stop()
+
+        let chunks = SpeechChunker.chunks(in: text as NSString,
+                                          from: offset,
+                                          maxLength: Self.chunkLength(for: config.providerKind))
+        guard !chunks.isEmpty else { return }
+        isSpeaking = true
 
         if let provider = config.onlineProvider {
             activeEngine = config.providerName
-            isSpeaking = true
+            // 服务端支持语速参数的交给服务端;豆包这类只能本地变速
+            let localRate = config.providerKind.supportsServerRate ? 1.0 : config.multiplier
 
             OnlineSpeechReader.shared.onError = { [weak self] error in
                 Task { @MainActor in
                     guard let self else { return }
                     self.isSpeaking = false
                     self.onError?(error)
-                    self.speakWithSystem(text, config: config)
-                }
-            }
-            OnlineSpeechReader.shared.onChunkText = { [weak self] chunk in
-                Task { @MainActor in
-                    self?.currentChunk = chunk
                 }
             }
 
-            let chunks = SpeechChunking.chunks(text, providerKind: config.providerKind)
-            // 服务端支持语速参数的引擎交给服务端;豆包这类只能本地变速
-            let localRate = config.providerKind.supportsServerRate ? 1.0 : config.multiplier
-            OnlineSpeechReader.shared.play(sentences: chunks,
+            OnlineSpeechReader.shared.play(chunks: chunks,
                                            provider: provider,
                                            voice: config.voice,
                                            rate: config.multiplier,
                                            prefetch: config.prefetch,
-                                           clientRate: localRate) { [weak self] in
+                                           clientRate: localRate,
+                                           onChunk: { [weak self] index, chunk in
                 Task { @MainActor in
-                    self?.isSpeaking = false
-                    self?.onPageFinished?()
+                    guard let self else { return }
+                    self.currentRange = chunk.range
+                    self.progressText = "\(index + 1)/\(chunks.count) 段"
                 }
-            }
+            }, onFinished: { [weak self] in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.isSpeaking = false
+                    self.onChapterFinished?()
+                }
+            })
             return
         }
 
-        speakWithSystem(text, config: config)
+        systemChunks = chunks
+        systemIndex = 0
+        systemActive = true
+        systemVoiceID = config.systemVoiceID
+        systemMultiplier = config.multiplier
+        activeEngine = "系统"
+        speakNextSystemChunk()
     }
 
     func stop() {
         OnlineSpeechReader.shared.stop()
+        systemActive = false
+        systemChunks = []
+        systemIndex = 0
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
         isSpeaking = false
         activeEngine = ""
         progressText = ""
-        currentChunk = ""
+        currentRange = nil
     }
 
     // MARK: - 系统语音
 
-    private func speakWithSystem(_ text: String, config: SpeechConfig) {
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = SystemVoiceCatalog.bestVoice(identifier: config.systemVoiceID)
-        utterance.rate = Self.avRate(forMultiplier: config.multiplier)
-        activeEngine = "系统"
-        currentChunk = text
-        isSpeaking = true
+    private func speakNextSystemChunk() {
+        guard systemActive, systemIndex < systemChunks.count else {
+            systemActive = false
+            isSpeaking = false
+            onChapterFinished?()
+            return
+        }
+
+        let chunk = systemChunks[systemIndex]
+        systemIndex += 1
+
+        currentRange = chunk.range
+        progressText = "\(systemIndex)/\(systemChunks.count) 段"
+
+        let utterance = AVSpeechUtterance(string: chunk.text)
+        utterance.voice = SystemVoiceCatalog.bestVoice(identifier: systemVoiceID)
+        utterance.rate = Self.avRate(forMultiplier: systemMultiplier)
         synthesizer.speak(utterance)
     }
 
@@ -103,22 +140,29 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
         return Float(max(0.1, min(raw, 1.0)))
     }
 
+    /// 块长度:越小高亮越贴合,但请求次数越多
+    private static func chunkLength(for kind: TTSProviderKind) -> Int {
+        switch kind {
+        case .doubao: return 110
+        case .edgeServer: return 120
+        default: return 90
+        }
+    }
+
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            guard self.isSpeaking, self.activeEngine == "系统" else { return }
-            self.isSpeaking = false
-            self.currentChunk = ""
-            self.onPageFinished?()
+            guard self.systemActive else { return }
+            self.speakNextSystemChunk()
         }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                                        didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor in
-            if self.activeEngine == "系统" {
+            if self.systemActive {
+                self.systemActive = false
                 self.isSpeaking = false
-                self.currentChunk = ""
             }
         }
     }
