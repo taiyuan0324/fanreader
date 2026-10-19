@@ -69,12 +69,17 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
                 }
             }
 
+            // 豆包是浏览器端逐个合成,并发一高就触发限流→服务端降级成微软
+            let parallel = config.providerKind == .doubao ? 1 : 3
+            let ahead = config.providerKind == .doubao ? min(config.prefetch, 3) : config.prefetch
+
             OnlineSpeechReader.shared.play(chunks: chunks,
                                            provider: provider,
                                            voice: config.voice,
                                            rate: config.multiplier,
-                                           prefetch: config.prefetch,
+                                           prefetch: ahead,
                                            clientRate: localRate,
+                                           concurrency: parallel,
                                            onChunk: { [weak self] index, chunk in
                 Task { @MainActor in
                     guard let self else { return }

@@ -23,13 +23,14 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
               rate: Double,
               prefetch: Int,
               clientRate: Double = 1.0,
+              concurrency: Int = 3,
               onChunk: @escaping (Int, SpeechChunk) -> Void,
               onFinished: @escaping () -> Void) {
         stop()
         guard !chunks.isEmpty else { return }
 
         let ahead = max(1, min(prefetch, 15))
-        let concurrency = 3
+        let parallel = max(1, min(concurrency, 3))
 
         task = Task { [weak self] in
             guard let self else { return }
@@ -41,7 +42,7 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
             func start(upTo slot: Int) {
                 while nextToStart < chunks.count,
                       nextToStart < slot + ahead,
-                      inFlight.count < concurrency {
+                      inFlight.count < parallel {
                     let index = nextToStart
                     let text = chunks[index].text
                     inFlight[index] = Task {
