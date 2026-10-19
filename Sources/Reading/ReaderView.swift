@@ -104,11 +104,7 @@ struct ReaderView: View {
 
             TabView(selection: $model.pageIndex) {
                 ForEach(Array(model.pages.enumerated()), id: \.offset) { index, page in
-                    ZStack {
-                        // 只给邻近三页建真正的 UITextView,其余留白:
-                        // TabView 会一次性实例化所有子视图,整章几十页会直接把主线程压死
-                        if abs(index - model.pageIndex) <= 1 {
-                    PagedTextView(
+                    CoreTextPage(
                         attributedText: page,
                         highlightRange: highlightRange(pageIndex: index),
                         highlightColor: highlightColor,
@@ -126,8 +122,6 @@ struct ReaderView: View {
                         }
                     )
                     .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
-                        }
-                    }
                     .tag(index)
                 }
             }

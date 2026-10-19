@@ -18,12 +18,14 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: 翻页
-        CFBundleShortVersionString: "0.6.1"
-        CFBundleVersion: "14"
+        CFBundleShortVersionString: "0.6.2"
+        CFBundleVersion: "15"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIFileSharingEnabled: true
+        UIBackgroundModes:
+          - audio
         UIRequiresFullScreen: true
         LSSupportsOpeningDocumentsInPlace: true
         UIApplicationSupportsIndirectInputEvents: true
