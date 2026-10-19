@@ -17,6 +17,8 @@ struct ReaderView: View {
     @State private var isListening = false
     /// TabView 下标 = 正文页 + 首尾两个跨章占位页
     @State private var displayIndex = 1
+    /// 本次朗读所属章节(切章后旧回调一律作废,避免重复跳章)
+    @State private var speechChapter = -1
     @State private var showPanel = false
     @State private var showSettings = false
     @State private var showThemeQuickBar = false
@@ -328,8 +330,7 @@ struct ReaderView: View {
 
                 HStack(spacing: 22) {
                     Button {
-                        model.previousChapter()
-                        persist()
+                        jumpChapter(-1)
                     } label: {
                         Image(systemName: "chevron.left.2")
                     }
@@ -357,8 +358,7 @@ struct ReaderView: View {
                     }
 
                     Button {
-                        model.nextChapter()
-                        persist()
+                        jumpChapter(1)
                     } label: {
                         Image(systemName: "chevron.right.2")
                     }
@@ -400,8 +400,7 @@ struct ReaderView: View {
     private var listeningBar: some View {
         HStack(spacing: 0) {
             Button {
-                model.previousChapter()
-                persist()
+                jumpChapter(-1)
             } label: {
                 Text("上一章").font(.system(size: 12))
             }
@@ -424,8 +423,7 @@ struct ReaderView: View {
             .buttonStyle(.plain)
 
             Button {
-                model.nextChapter()
-                persist()
+                jumpChapter(1)
             } label: {
                 Text("下一章").font(.system(size: 12))
             }
@@ -500,7 +498,10 @@ struct ReaderView: View {
 
     /// 朗读跨页时自动翻到对应页
     private func followCurrentRange() {
-        guard speech.isSpeaking, !model.isPDF, let range = speech.currentRange else { return }
+        guard speech.isSpeaking,
+              model.chapterIndex == speechChapter,
+              !model.isPDF,
+              let range = speech.currentRange else { return }
         guard let page = model.pageIndex(containing: range.location) else { return }
         if page != model.pageIndex {
             model.pageIndex = page
@@ -514,6 +515,27 @@ struct ReaderView: View {
         speakChapter(from: absolute)
     }
 
+    /// 手动切章(按钮/滑动):必须停掉旧章的朗读,否则旧回调会把页码/章节再改一次
+    private func jumpChapter(_ delta: Int, landOnLastPage: Bool = false) {
+        speech.stop()
+        if delta > 0 {
+            model.nextChapter()
+        } else {
+            model.previousChapter()
+        }
+        if landOnLastPage {
+            model.pageIndex = max(model.pages.count - 1, 0)
+        }
+        displayIndex = model.pageIndex + 1
+
+        if isListening {
+            let offset = landOnLastPage
+                ? (model.pageRanges.last?.location ?? 0)
+                : 0
+            speakChapter(from: offset)
+        }
+    }
+
     /// 滑到首/尾的占位页时切换到相邻章节
     private func handleDisplayIndexChange(_ index: Int) {
         let pageCount = model.pages.count
@@ -524,8 +546,7 @@ struct ReaderView: View {
                 displayIndex = 1
                 return
             }
-            model.previousChapter()
-            displayIndex = max(1, model.pages.count)
+            jumpChapter(-1, landOnLastPage: true)
             return
         }
 
@@ -534,8 +555,7 @@ struct ReaderView: View {
                 displayIndex = pageCount
                 return
             }
-            model.nextChapter()
-            displayIndex = 1
+            jumpChapter(1)
             return
         }
 
@@ -574,6 +594,7 @@ struct ReaderView: View {
         let text = model.chapterText
         guard !text.isEmpty else { return }
         let controller = speech
+        speechChapter = model.chapterIndex
 
         speech.onError = { error in
             speechError = error.localizedDescription
@@ -581,8 +602,10 @@ struct ReaderView: View {
         speech.onChapterFinished = { [weak controller] in
             guard let controller,
                   settings.autoTurnPageOnSpeech,
+                  model.chapterIndex == speechChapter,      // 期间没有被手动切章
                   model.chapterIndex + 1 < model.chapterCount else { return }
             model.nextChapter()
+            speechChapter = model.chapterIndex
             controller.speakChapter(model.chapterText,
                                     from: 0,
                                     config: SpeechConfig(onlineProvider: tts.provider,
