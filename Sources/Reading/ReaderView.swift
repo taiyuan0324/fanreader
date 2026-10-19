@@ -38,6 +38,9 @@ struct ReaderView: View {
         .preferredColorScheme(colorScheme)
         .task { await model.load() }
         .onDisappear { persist() }
+        .onChange(of: speech.currentChunk) { chunk in
+            followSpeechChunk(chunk)
+        }
         .sheet(isPresented: $showPanel) {
             ReaderPanelView(model: model, bookID: model.book.id)
                 .environmentObject(bookmarkStore)
@@ -101,23 +104,31 @@ struct ReaderView: View {
 
             TabView(selection: $model.pageIndex) {
                 ForEach(Array(model.pages.enumerated()), id: \.offset) { index, page in
-                    CoreTextPage(attributedText: page)
-                        .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
-                        .tag(index)
+                    PagedTextView(
+                        attributedText: page,
+                        highlightRange: highlightRange(pageIndex: index),
+                        highlightColor: highlightColor,
+                        onSingleTap: { fraction in
+                            if fraction < 0.3 {
+                                model.previousPage()
+                            } else if fraction > 0.7 {
+                                model.nextPage()
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() }
+                            }
+                        },
+                        onDoubleTap: { charIndex in
+                            startSpeech(fromPage: index, charIndex: charIndex)
+                        }
+                    )
+                    .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
+                    .tag(index)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .highPriorityGesture(
-                TapGesture(count: 2).onEnded { toggleSpeech() }
-            )
             .padding(.horizontal, settings.margin)
             .padding(.top, settings.showHeaderFooter ? headerHeight + 10 : 12)
             .padding(.bottom, settings.showHeaderFooter ? footerHeight + 6 : 12)
-            .simultaneousGesture(
-                SpatialTapGesture().onEnded { value in
-                    handleTap(x: value.location.x, width: proxy.size.width)
-                }
-            )
             .onAppear { relayout(pageSize: pageSize) }
             .onChange(of: proxy.size) { newValue in
                 let insets = pageInsets(full: newValue)
@@ -365,14 +376,51 @@ struct ReaderView: View {
 
     // MARK: - 交互
 
-    private func handleTap(x: CGFloat, width: CGFloat) {
-        if x < width * 0.3 {
-            model.previousPage()
-        } else if x > width * 0.7 {
-            model.nextPage()
-        } else {
-            chromeVisible.toggle()
+    private var highlightColor: UIColor {
+        let dark = settings.theme == .dark || settings.theme == .black
+        return dark ? UIColor.systemYellow.withAlphaComponent(0.26)
+                    : UIColor.systemYellow.withAlphaComponent(0.34)
+    }
+
+    /// 当前朗读片段在本页的区间
+    private func highlightRange(pageIndex: Int) -> NSRange? {
+        guard speech.isSpeaking, !speech.currentChunk.isEmpty,
+              model.pages.indices.contains(pageIndex) else { return nil }
+        let text = model.pages[pageIndex].string as NSString
+        guard text.length > 0 else { return nil }
+        let range = text.range(of: speech.currentChunk)
+        return range.location == NSNotFound ? nil : range
+    }
+
+    /// 朗读跨页时自动跟到下一页
+    private func followSpeechChunk(_ chunk: String) {
+        guard speech.isSpeaking, !chunk.isEmpty, !model.isPDF else { return }
+        if model.pages.indices.contains(model.pageIndex),
+           model.pages[model.pageIndex].string.contains(chunk) {
+            return
         }
+        guard model.pageIndex + 1 < model.pages.count else { return }
+        for index in (model.pageIndex + 1)..<model.pages.count {
+            if model.pages[index].string.contains(chunk) {
+                model.pageIndex = index
+                return
+            }
+        }
+    }
+
+    /// 双击定位:从本页第 charIndex 个字符开始朗读
+    private func startSpeech(fromPage page: Int, charIndex: Int) {
+        speech.stop()
+        guard model.pages.indices.contains(page) else { return }
+        if model.pageIndex != page { model.pageIndex = page }
+
+        let string = model.pages[page].string as NSString
+        guard string.length > 0 else { return }
+        let clamped = min(max(charIndex, 0), string.length - 1)
+        var remainder = string.substring(from: clamped)
+        remainder = remainder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !remainder.isEmpty else { return }
+        speak(remainder)
     }
 
     private func relayout(pageSize: CGSize) {
@@ -401,14 +449,15 @@ struct ReaderView: View {
             guard reader.pageIndex != before || reader.chapterIndex != beforeChapter,
                   let text = reader.textForSpeech() else { return }
             controller.speak(text,
-                             rate: Float(config.speechRate),
                              config: SpeechConfig(onlineProvider: speechSettings.provider,
                                                   voice: speechSettings.voice,
                                                   systemVoiceID: speechSettings.systemVoice,
                                                   providerKind: speechSettings.kind,
                                                   providerName: speechSettings.kind == .system
                                                     ? "系统"
-                                                    : speechSettings.kind.name))
+                                                    : speechSettings.kind.name,
+                                                  prefetch: Int(config.prefetchCount),
+                                                  multiplier: config.normalizedMultiplier))
         }
 
         guard let text = reader.textForSpeech() else { return }
@@ -420,8 +469,10 @@ struct ReaderView: View {
                                   voice: tts.voice,
                                   systemVoiceID: tts.systemVoice,
                                   providerKind: tts.kind,
-                                  providerName: tts.kind == .system ? "系统" : tts.kind.name)
-        speech.speak(text, rate: Float(settings.speechRate), config: config)
+                                  providerName: tts.kind == .system ? "系统" : tts.kind.name,
+                                  prefetch: Int(settings.prefetchCount),
+                                  multiplier: settings.normalizedMultiplier)
+        speech.speak(text, config: config)
     }
 
     private func addBookmark() {
@@ -668,8 +719,10 @@ struct ReaderSettingsSheet: View {
                         Text(tts.isConfigured ? "已配置" : "未配置(将用系统语音)")
                             .foregroundStyle(tts.isConfigured ? .green : .orange)
                     }
-                    sliderRow(title: "语速", value: $settings.speechRate,
-                              range: 0.35...0.7, step: 0.05, format: "%.2f")
+                    sliderRow(title: "倍速", value: $settings.speechRateMultiplier,
+                              range: 1.0...3.0, step: 0.1, format: "%.1f×")
+                    sliderRow(title: "预缓存段数", value: $settings.prefetchCount,
+                              range: 5...15, step: 1, format: "%.0f 段")
                     Toggle("读完自动翻页", isOn: $settings.autoTurnPageOnSpeech)
                     Text("在线语音在 设置 → 语音合成 里配置")
                         .font(.caption2)

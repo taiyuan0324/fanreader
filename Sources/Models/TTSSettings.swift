@@ -146,7 +146,7 @@ final class TTSSettings: ObservableObject {
             return
         }
         do {
-            let data = try await provider.synthesize(TTSRequest(text: text, rate: 0.5, voice: voice))
+            let data = try await provider.synthesize(TTSRequest(text: text, rate: 1.0, voice: voice))
             await OnlineSpeechReader.shared.playOnce(data)
         } catch {
             report(error)

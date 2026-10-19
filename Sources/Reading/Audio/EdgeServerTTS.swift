@@ -11,7 +11,8 @@ struct EdgeServerTTSProvider: TTSProvider {
     func synthesize(_ request: TTSRequest) async throws -> Data {
         // 注意:`+20%` 里的 `+` 必须编码成 %2B。
         // 服务端按 application/x-www-form-urlencoded 解析,裸 `+` 会变成空格,导致 bad rate。
-        let ratePercent = Int(((request.rate - 0.5) * 100).rounded())
+        // request.rate 是倍速(1.0–3.0),映射为 +0% … +100%
+        let ratePercent = Int(min(max((request.rate - 1.0) * 100, 0), 100).rounded())
         var pairs: [(String, String)] = [
             ("text", request.text),
             ("voiceName", request.voice.isEmpty ? "zh-CN-XiaoxiaoNeural" : request.voice),

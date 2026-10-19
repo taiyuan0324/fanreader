@@ -171,12 +171,15 @@ final class ReadingSettings: ObservableObject {
     @Published var alignment: ReaderTextAlignment { didSet { write(alignment.rawValue, .alignment) } }
     @Published var pageMode: ReaderPageMode { didSet { write(pageMode.rawValue, .pageMode) } }
     @Published var showHeaderFooter: Bool { didSet { write(showHeaderFooter, .showChrome) } }
-    @Published var speechRate: Double { didSet { write(speechRate, .speechRate) } }
+    /// 朗读倍速 1.0–3.0
+    @Published var speechRateMultiplier: Double { didSet { write(speechRateMultiplier, .speechRate) } }
+    /// 预缓存段数 5–15
+    @Published var prefetchCount: Double { didSet { write(prefetchCount, .prefetch) } }
     @Published var autoTurnPageOnSpeech: Bool { didSet { write(autoTurnPageOnSpeech, .autoTurn) } }
 
     private enum Key: String {
         case theme, fontSize, lineHeight, paragraphSpacing, indent, margin
-        case fontFamily, alignment, pageMode, showChrome, speechRate, autoTurn
+        case fontFamily, alignment, pageMode, showChrome, speechRate, prefetch, autoTurn
     }
 
     init() {
@@ -191,8 +194,14 @@ final class ReadingSettings: ObservableObject {
         alignment = ReaderTextAlignment(rawValue: defaults.string(forKey: Key.alignment.rawValue) ?? "") ?? .leading
         pageMode = ReaderPageMode(rawValue: defaults.string(forKey: Key.pageMode.rawValue) ?? "") ?? .slide
         showHeaderFooter = defaults.object(forKey: Key.showChrome.rawValue) as? Bool ?? true
-        speechRate = defaults.object(forKey: Key.speechRate.rawValue) as? Double ?? 0.5
+        speechRateMultiplier = defaults.object(forKey: Key.speechRate.rawValue) as? Double ?? 1.0
+        prefetchCount = defaults.object(forKey: Key.prefetch.rawValue) as? Double ?? 6
         autoTurnPageOnSpeech = defaults.object(forKey: Key.autoTurn.rawValue) as? Bool ?? true
+    }
+
+    /// 兼容旧版本存的是 AVSpeech rate(0.35–0.7)
+    var normalizedMultiplier: Double {
+        speechRateMultiplier < 0.95 ? max(1, speechRateMultiplier * 2.2) : speechRateMultiplier
     }
 
     var uiFont: UIFont {

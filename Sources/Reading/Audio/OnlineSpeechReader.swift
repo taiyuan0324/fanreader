@@ -1,8 +1,7 @@
 import Foundation
 import AVFoundation
 
-/// 在线语音播放器:把文本按句子切片,逐句请求音频并播放。
-/// 不预取(每句延迟约 200–500ms),换取实现简单、可随时中断。
+/// 在线语音播放器:按片段请求音频并顺序播放,同时向前预取若干段(可配置 5–15)。
 @MainActor
 final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
     static let shared = OnlineSpeechReader()
@@ -13,63 +12,71 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
 
     private(set) var isPlaying = false
     var onError: ((Error) -> Void)?
-    /// 每块开始播放时回调(当前序号, 总数),用于显示朗读进度
-    var onChunk: ((Int, Int) -> Void)?
+    /// 正在播放的片段文本,用于文字高亮跟随
+    var onChunkText: ((String) -> Void)?
 
-    // MARK: - 播放整页
+    // MARK: - 播放
 
     func play(sentences: [String],
               provider: TTSProvider,
               voice: String,
               rate: Double,
+              prefetch: Int,
               onPageFinished: @escaping () -> Void) {
         stop()
+        guard !sentences.isEmpty else { return }
+
+        let ahead = max(1, min(prefetch, 15))
+        let concurrency = 3          // 同时在跑的请求数,避免把服务打爆
+
         task = Task { [weak self] in
             guard let self else { return }
             await self.activateSession()
 
-            var prefetched: Task<Data, Error>?
+            var inFlight: [Int: Task<Data, Error>] = [:]
+            var nextToStart = 0
 
-            for (index, sentence) in sentences.enumerated() {
+            func start(upTo slot: Int) {
+                while nextToStart < sentences.count,
+                      nextToStart < slot + ahead,
+                      inFlight.count < concurrency {
+                    let index = nextToStart
+                    let text = sentences[index]
+                    inFlight[index] = Task {
+                        try await provider.synthesize(TTSRequest(text: text, rate: rate, voice: voice))
+                    }
+                    nextToStart += 1
+                }
+            }
+
+            for index in sentences.indices {
                 if Task.isCancelled { break }
+                start(upTo: index)
+
+                guard let request = inFlight[index] else { continue }
                 let data: Data
                 do {
-                    if let prefetched {
-                        data = try await prefetched.value
-                    } else {
-                        data = try await provider.synthesize(TTSRequest(text: sentence,
-                                                                        rate: rate,
-                                                                        voice: voice))
-                    }
+                    data = try await request.value
                 } catch {
-                    if !Task.isCancelled { self.onError?(error) }
-                    prefetched?.cancel()
+                    if !Task.isCancelled {
+                        self.onError?(error)
+                    }
+                    for pending in inFlight.values { pending.cancel() }
                     self.finish()
                     return
                 }
+                inFlight[index] = nil
 
-                // 播放当前块的同时，后台预取下一块，减少翻页/连续朗读的停顿
-                if index + 1 < sentences.count {
-                    let next = sentences[index + 1]
-                    prefetched = Task {
-                        try await provider.synthesize(TTSRequest(text: next, rate: rate, voice: voice))
-                    }
-                } else {
-                    prefetched = nil
-                }
-
-                if Task.isCancelled {
-                    prefetched?.cancel()
-                    break
-                }
-                self.onChunk?(index + 1, sentences.count)
+                if Task.isCancelled { break }
+                self.onChunkText?(sentences[index])
                 await self.playAudio(data)
 
                 if index == sentences.count - 1 {
                     onPageFinished()
                 }
             }
-            prefetched?.cancel()
+
+            for pending in inFlight.values { pending.cancel() }
             self.finish()
         }
     }
@@ -144,7 +151,6 @@ enum SentenceSplitter {
                 if !trimmed.isEmpty { sentences.append(trimmed) }
                 buffer = ""
             } else if buffer.count >= maxLength {
-                // 长句按逗号再切一刀,避免单次请求过大
                 if let lastComma = buffer.lastIndex(where: { "，,、".contains($0) }),
                    buffer.distance(from: buffer.startIndex, to: lastComma) > 20 {
                     let head = String(buffer[buffer.startIndex...lastComma])

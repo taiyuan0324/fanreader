@@ -90,8 +90,11 @@ enum SpeechChunking {
         switch providerKind {
         case .doubao:
             return merge(SentenceSplitter.split(text, maxLength: 240), limit: 260)
+        case .edgeServer:
+            // 段越短高亮越贴合,服务端有预缓存兜底
+            return SentenceSplitter.split(text, maxLength: 110)
         default:
-            return SentenceSplitter.split(text)
+            return SentenceSplitter.split(text, maxLength: 90)
         }
     }
 

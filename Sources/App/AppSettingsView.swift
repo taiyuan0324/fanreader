@@ -67,8 +67,10 @@ struct AppSettingsView: View {
                         }
                     }
 
-                    row(title: "语速", value: String(format: "%.2f", settings.speechRate))
-                    Slider(value: $settings.speechRate, in: 0.35...0.7, step: 0.05)
+                    row(title: "倍速", value: String(format: "%.1f×", settings.speechRateMultiplier))
+                    Slider(value: $settings.speechRateMultiplier, in: 1.0...3.0, step: 0.1)
+                    row(title: "预缓存段数", value: String(format: "%.0f 段", settings.prefetchCount))
+                    Slider(value: $settings.prefetchCount, in: 5...15, step: 1)
                     Toggle("读完自动翻页", isOn: $settings.autoTurnPageOnSpeech)
                 } header: {
                     Text("语音合成")

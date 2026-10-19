@@ -85,7 +85,7 @@ struct AzureTTSProvider: TTSProvider {
         }
 
         let voice = request.voice.isEmpty ? "zh-CN-XiaoxiaoNeural" : request.voice
-        let ratePercent = Int((request.rate - 0.5) * 100)
+        let ratePercent = Int(((request.rate - 1.0) * 100).rounded())
         let rateString = ratePercent >= 0 ? "+\(ratePercent)%" : "\(ratePercent)%"
 
         let escaped = request.text

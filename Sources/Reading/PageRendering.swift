@@ -129,3 +129,95 @@ struct ScrollChapterView: UIViewRepresentable {
         }
     }
 }
+
+// MARK: - 支持高亮与点按定位的正文视图
+
+/// 用 UITextView 渲染单页:好处是能做逐句高亮、双击命中到具体字符。
+/// 排版属性与分页器共用同一份 NSAttributedString,所以不会错位。
+final class TappableTextView: UITextView {
+    var onSingleTap: ((CGFloat) -> Void)?
+    var onDoubleTap: ((Int) -> Void)?
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        isEditable = false
+        isSelectable = false
+        isScrollEnabled = false
+        backgroundColor = .clear
+        textContainerInset = .zero
+        textContainer.lineFragmentPadding = 0
+        contentInset = .zero
+
+        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(handleDouble(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+
+        let singleTap = UITapGestureRecognizer(target: self, action: #selector(handleSingle(_:)))
+        singleTap.numberOfTapsRequired = 1
+        singleTap.require(toFail: doubleTap)
+        addGestureRecognizer(singleTap)
+    }
+
+    @objc private func handleDouble(_ gesture: UITapGestureRecognizer) {
+        let point = gesture.location(in: self)
+        guard let position = closestPosition(to: point) else { return }
+        let index = offset(from: beginningOfDocument, to: position)
+        onDoubleTap?(index)
+    }
+
+    @objc private func handleSingle(_ gesture: UITapGestureRecognizer) {
+        let x = gesture.location(in: self).x
+        let fraction = bounds.width > 1 ? x / bounds.width : 0.5
+        onSingleTap?(min(max(fraction, 0), 1))
+    }
+}
+
+/// 单页正文:富文本 + 高亮区间 + 点按回调
+struct PagedTextView: UIViewRepresentable {
+    let attributedText: NSAttributedString
+    let highlightRange: NSRange?
+    let highlightColor: UIColor
+    let onSingleTap: (CGFloat) -> Void
+    let onDoubleTap: (Int) -> Void
+
+    func makeUIView(context: Context) -> TappableTextView {
+        let view = TappableTextView()
+        view.onSingleTap = onSingleTap
+        view.onDoubleTap = onDoubleTap
+        apply(to: view)
+        return view
+    }
+
+    func updateUIView(_ view: TappableTextView, context: Context) {
+        view.onSingleTap = onSingleTap
+        view.onDoubleTap = onDoubleTap
+        apply(to: view)
+    }
+
+    private func apply(to view: TappableTextView) {
+        let text = NSMutableAttributedString(attributedString: attributedText)
+        let full = NSRange(location: 0, length: text.length)
+
+        if let range = highlightRange,
+           range.location != NSNotFound,
+           range.location >= 0,
+           range.location + range.length <= text.length,
+           range.length > 0 {
+            text.addAttribute(.backgroundColor, value: highlightColor, range: range)
+        }
+
+        if view.attributedText != text {
+            view.attributedText = text
+        }
+        _ = full
+    }
+}
