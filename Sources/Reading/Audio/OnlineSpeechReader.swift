@@ -73,8 +73,12 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
             }
 
             for pending in inFlight.values { pending.cancel() }
+            let completed = !Task.isCancelled
             self.finish()
-            onFinished()
+            // 被 stop() 取消时不能再回调,否则调用方会误以为整章读完而跳到下一章
+            if completed {
+                onFinished()
+            }
         }
     }
 

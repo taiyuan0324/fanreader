@@ -116,9 +116,13 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
 
     private func speakNextSystemChunk() {
         guard systemActive, systemIndex < systemChunks.count else {
+            let finishedNormally = systemActive
             systemActive = false
             isSpeaking = false
-            onChapterFinished?()
+            // 只有自然读完才通知;被 stop() 打断时不通知
+            if finishedNormally {
+                onChapterFinished?()
+            }
             return
         }
 

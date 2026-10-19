@@ -484,9 +484,7 @@ struct ReaderView: View {
     // MARK: - 交互
 
     private var highlightColor: UIColor {
-        let dark = settings.theme == .dark || settings.theme == .black
-        return dark ? UIColor.systemYellow.withAlphaComponent(0.26)
-                    : UIColor.systemYellow.withAlphaComponent(0.34)
+        settings.theme.highlightColor
     }
 
     /// 当前朗读块在本页的高亮区间(绝对区间裁剪到本页)

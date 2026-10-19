@@ -71,6 +71,30 @@ enum ReaderTheme: String, CaseIterable, Identifiable {
         }
     }
 
+    /// 朗读高亮色:跟随主题的暖色块,避免刺眼的纯黄
+    var highlightColor: UIColor {
+        switch self {
+        case .paper:
+            return UIColor(red: 0.965, green: 0.918, blue: 0.804, alpha: 1)
+        case .cream:
+            return UIColor(red: 0.941, green: 0.878, blue: 0.725, alpha: 1)
+        case .green:
+            return UIColor(red: 0.882, green: 0.929, blue: 0.800, alpha: 1)
+        case .gray:
+            return UIColor(red: 0.902, green: 0.890, blue: 0.855, alpha: 1)
+        case .dark:
+            return UIColor(white: 0.98, alpha: 0.16)
+        case .black:
+            return UIColor(white: 0.98, alpha: 0.13)
+        case .system:
+            return UIColor { trait in
+                trait.userInterfaceStyle == .dark
+                    ? UIColor(white: 0.98, alpha: 0.16)
+                    : UIColor(red: 0.965, green: 0.918, blue: 0.804, alpha: 1)
+            }
+        }
+    }
+
     var prefersLightStatusBar: Bool {
         switch self {
         case .dark, .black: return true
