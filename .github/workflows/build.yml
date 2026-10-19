@@ -1,0 +1,117 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # XcodeGen 最新版写出 objectVersion 77(Xcode 16 格式),
+    # 因此需要默认 Xcode 16 的 macos-15 runner。
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build for device (unsigned)
+        run: |
+          xcodebuild \
+            -project FanReader.xcodeproj \
+            -scheme FanReader \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p out/Payload
+          cp -R build/Build/Products/Release-iphoneos/FanReader.app out/Payload/
+          cd out
+          zip -qry FanReader-unsigned.ipa Payload
+
+      - name: Build for simulator
+        run: |
+          xcodebuild \
+            -project FanReader.xcodeproj \
+            -scheme FanReader \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package simulator app
+        run: |
+          mkdir -p out-sim
+          cp -R build-sim/Build/Products/Debug-iphonesimulator/FanReader.app out-sim/
+          cd out-sim
+          zip -qry FanReader-simulator.app.zip FanReader.app
+
+      - name: Smoke test in simulator
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -oE 'iPhone 1[5-9][^()]*' | head -1 | xargs)
+          echo "device=$DEVICE"
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b || true
+          xcrun simctl install booted build-sim/Build/Products/Debug-iphonesimulator/FanReader.app
+          mkdir -p shots
+
+          shot() {
+            xcrun simctl terminate booted com.example.fanreader >/dev/null 2>&1 || true
+            sleep 1
+            xcrun simctl launch booted com.example.fanreader "$@" >/dev/null
+            sleep 7
+            xcrun simctl io booted screenshot "shots/$SHOT.png"
+          }
+
+          SHOT=01-bookshelf shot -seedDemo
+          SHOT=02-reader-paper shot -seedDemo -openFirstBook
+          SHOT=03-reader-dark shot -seedDemo -openFirstBook -theme dark
+          SHOT=04-reader-cream-scroll shot -seedDemo -openFirstBook -theme cream -pageMode scroll
+          ls -la shots
+          echo "--- import log ---"
+          xcrun simctl get_app_container booted com.example.fanreader data > /tmp/appdir.txt 2>/dev/null || true
+          cat /tmp/appdir.txt || true
+          if [ -s /tmp/appdir.txt ]; then
+            cat "$(cat /tmp/appdir.txt)/Documents/import.log" 2>/dev/null || echo "(no log)"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: FanReader-simulator-screenshots
+          path: shots
+          if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FanReader-unsigned-ipa
+          path: out/FanReader-unsigned.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FanReader-simulator-app
+          path: out-sim/FanReader-simulator.app.zip
+          if-no-files-found: error
+

@@ -1,0 +1,16 @@
+# Xcode
+build/
+build-sim/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+
+# CI 产物(从 Actions Artifacts 取,不入库)
+out/
+out-sim/
+dist/
+*.ipa
+*.dSYM.zip
+
+.DS_Store
