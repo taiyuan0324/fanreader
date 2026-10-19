@@ -104,6 +104,10 @@ struct ReaderView: View {
 
             TabView(selection: $model.pageIndex) {
                 ForEach(Array(model.pages.enumerated()), id: \.offset) { index, page in
+                    ZStack {
+                        // 只给邻近三页建真正的 UITextView,其余留白:
+                        // TabView 会一次性实例化所有子视图,整章几十页会直接把主线程压死
+                        if abs(index - model.pageIndex) <= 1 {
                     PagedTextView(
                         attributedText: page,
                         highlightRange: highlightRange(pageIndex: index),
@@ -122,6 +126,8 @@ struct ReaderView: View {
                         }
                     )
                     .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
+                        }
+                    }
                     .tag(index)
                 }
             }
@@ -382,26 +388,46 @@ struct ReaderView: View {
                     : UIColor.systemYellow.withAlphaComponent(0.34)
     }
 
-    /// 当前朗读片段在本页的区间
+    /// 当前朗读片段在本页的区间。
+    /// 分句时把换行换成了空格,所以这里要容忍空白差异,否则永远匹配不上。
     private func highlightRange(pageIndex: Int) -> NSRange? {
         guard speech.isSpeaking, !speech.currentChunk.isEmpty,
               model.pages.indices.contains(pageIndex) else { return nil }
-        let text = model.pages[pageIndex].string as NSString
-        guard text.length > 0 else { return nil }
-        let range = text.range(of: speech.currentChunk)
-        return range.location == NSNotFound ? nil : range
+        return Self.range(of: speech.currentChunk, in: model.pages[pageIndex].string)
+    }
+
+    static func range(of chunk: String, in pageText: String) -> NSRange? {
+        let text = pageText as NSString
+        guard text.length > 0, !chunk.isEmpty else { return nil }
+
+        let direct = text.range(of: chunk)
+        if direct.location != NSNotFound { return direct }
+
+        // 空格 ↔ 换行/多空格
+        let escaped = NSRegularExpression.escapedPattern(for: chunk)
+            .replacingOccurrences(of: "\\ ", with: "\\s+")
+        if let regex = try? NSRegularExpression(pattern: escaped),
+           let match = regex.firstMatch(in: pageText,
+                                        range: NSRange(location: 0, length: text.length)) {
+            return match.range
+        }
+
+        // 再退一步:用前 10 个字定位
+        let prefix = String(chunk.prefix(10))
+        let loose = text.range(of: prefix)
+        return loose.location == NSNotFound ? nil : loose
     }
 
     /// 朗读跨页时自动跟到下一页
     private func followSpeechChunk(_ chunk: String) {
         guard speech.isSpeaking, !chunk.isEmpty, !model.isPDF else { return }
         if model.pages.indices.contains(model.pageIndex),
-           model.pages[model.pageIndex].string.contains(chunk) {
+           Self.range(of: chunk, in: model.pages[model.pageIndex].string) != nil {
             return
         }
         guard model.pageIndex + 1 < model.pages.count else { return }
         for index in (model.pageIndex + 1)..<model.pages.count {
-            if model.pages[index].string.contains(chunk) {
+            if Self.range(of: chunk, in: model.pages[index].string) != nil {
                 model.pageIndex = index
                 return
             }

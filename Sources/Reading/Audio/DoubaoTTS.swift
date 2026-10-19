@@ -89,7 +89,8 @@ enum SpeechChunking {
     static func chunks(_ text: String, providerKind: TTSProviderKind) -> [String] {
         switch providerKind {
         case .doubao:
-            return merge(SentenceSplitter.split(text, maxLength: 240), limit: 260)
+            // 浏览器端合成慢,段落切小一点可以更快出第一段声音
+            return merge(SentenceSplitter.split(text, maxLength: 110), limit: 140)
         case .edgeServer:
             // 段越短高亮越贴合,服务端有预缓存兜底
             return SentenceSplitter.split(text, maxLength: 110)

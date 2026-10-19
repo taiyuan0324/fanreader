@@ -22,6 +22,7 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
               voice: String,
               rate: Double,
               prefetch: Int,
+              clientRate: Double = 1.0,
               onPageFinished: @escaping () -> Void) {
         stop()
         guard !sentences.isEmpty else { return }
@@ -69,7 +70,7 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
 
                 if Task.isCancelled { break }
                 self.onChunkText?(sentences[index])
-                await self.playAudio(data)
+                await self.playAudio(data, rate: clientRate)
 
                 if index == sentences.count - 1 {
                     onPageFinished()
@@ -105,9 +106,13 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
         try? session.setActive(true)
     }
 
-    private func playAudio(_ data: Data) async {
+    private func playAudio(_ data: Data, rate: Double = 1.0) async {
         guard let audio = try? AVAudioPlayer(data: data) else { return }
         audio.delegate = self
+        if rate > 1.01 {
+            audio.enableRate = true
+            audio.rate = Float(min(max(rate, 1.0), 3.0))
+        }
         audio.prepareToPlay()
         audio.play()
         player = audio

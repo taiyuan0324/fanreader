@@ -55,11 +55,14 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
             }
 
             let chunks = SpeechChunking.chunks(text, providerKind: config.providerKind)
+            // 服务端支持语速参数的引擎交给服务端;豆包这类只能本地变速
+            let localRate = config.providerKind.supportsServerRate ? 1.0 : config.multiplier
             OnlineSpeechReader.shared.play(sentences: chunks,
                                            provider: provider,
                                            voice: config.voice,
                                            rate: config.multiplier,
-                                           prefetch: config.prefetch) { [weak self] in
+                                           prefetch: config.prefetch,
+                                           clientRate: localRate) { [weak self] in
                 Task { @MainActor in
                     self?.isSpeaking = false
                     self?.onPageFinished?()

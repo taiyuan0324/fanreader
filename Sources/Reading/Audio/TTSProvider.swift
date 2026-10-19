@@ -21,6 +21,14 @@ enum TTSProviderKind: String, CaseIterable, Identifiable {
 
     var needsKey: Bool { self == .azure || self == .openAICompatible }
 
+    /// 服务端是否支持语速参数(否则由客户端变速)
+    var supportsServerRate: Bool {
+        switch self {
+        case .system, .doubao, .openAICompatible: return false
+        case .edgeServer, .azure: return true
+        }
+    }
+
     var hint: String {
         switch self {
         case .system:
