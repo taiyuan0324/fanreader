@@ -24,6 +24,11 @@ struct DoubaoTTSProvider: TTSProvider {
         guard let http = response as? HTTPURLResponse else {
             throw TTSError.message("响应异常")
         }
+
+        // 服务端可能把豆包降级成微软(edge),这里记录下来供界面提示
+        let served = http.value(forHTTPHeaderField: "X-TTS-Engine") ?? "doubao"
+        TTSEngineTrace.shared.set(served)
+
         guard (200..<300).contains(http.statusCode) else {
             let text = String(data: data, encoding: .utf8) ?? ""
             throw TTSError.http(status: http.statusCode, body: text)

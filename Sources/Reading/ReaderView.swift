@@ -468,9 +468,14 @@ struct ReaderView: View {
         .background(.ultraThinMaterial)
     }
 
-    /// 底栏文案:朗读中显示进度
+    /// 底栏文案:朗读中显示进度;豆包被服务端降级成微软时给出提示
     private var speechLabel: String {
         guard speech.isSpeaking, !speech.progressText.isEmpty else { return pageLabel }
+        if tts.kind == .doubao,
+           !speech.servedEngine.isEmpty,
+           speech.servedEngine != "doubao" {
+            return "\(speech.progressText) · 已降级微软"
+        }
         return speech.progressText
     }
 

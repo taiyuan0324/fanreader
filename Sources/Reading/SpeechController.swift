@@ -23,6 +23,8 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
     @Published private(set) var progressText: String = ""
     /// 当前朗读块在章节中的绝对区间
     @Published private(set) var currentRange: NSRange?
+    /// 服务端实际使用的引擎(豆包可能被降级成微软)
+    @Published private(set) var servedEngine: String = ""
 
     var onError: ((Error) -> Void)?
     /// 整章读完(或从起点读到底)
@@ -78,6 +80,9 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
                     guard let self else { return }
                     self.currentRange = chunk.range
                     self.progressText = "\(index + 1)/\(chunks.count) 段"
+                    if config.providerKind == .doubao {
+                        self.servedEngine = TTSEngineTrace.shared.current
+                    }
                 }
             }, onFinished: { [weak self] in
                 Task { @MainActor in
@@ -110,6 +115,7 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
         activeEngine = ""
         progressText = ""
         currentRange = nil
+        servedEngine = ""
     }
 
     // MARK: - 系统语音
