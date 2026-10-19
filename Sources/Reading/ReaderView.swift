@@ -570,6 +570,7 @@ struct ReaderView: View {
     private func speakChapter(from offset: Int) {
         let text = model.chapterText
         guard !text.isEmpty else { return }
+        let controller = speech
 
         speech.onError = { error in
             speechError = error.localizedDescription
