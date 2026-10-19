@@ -8,7 +8,11 @@ final class TTSSettings: ObservableObject {
     @Published var doubaoSpeaker: String { didSet { defaults.set(doubaoSpeaker, forKey: "tts.doubao.speaker") } }
     @Published var doubaoSpeakers: [String] = []
     @Published var doubaoStatus: String = "未检测"
-    @Published var edgeVoice: String { didSet { defaults.set(edgeVoice, forKey: "tts.edge.voice") } }
+    @Published var edgeServerBaseURL: String { didSet { defaults.set(edgeServerBaseURL, forKey: "tts.edge.base") } }
+    @Published var edgeServerVoice: String { didSet { defaults.set(edgeServerVoice, forKey: "tts.edge.voice") } }
+    @Published var edgeServerToken: String { didSet { Keychain.set(edgeServerToken, for: Self.edgeTokenKey) } }
+    @Published var edgeServerVoices: [String] = []
+    @Published var edgeServerStatus: String = "未检测"
     @Published var azureRegion: String { didSet { defaults.set(azureRegion, forKey: "tts.azure.region") } }
     @Published var azureVoice: String { didSet { defaults.set(azureVoice, forKey: "tts.azure.voice") } }
     @Published var openAIBaseURL: String { didSet { defaults.set(openAIBaseURL, forKey: "tts.openai.base") } }
@@ -27,6 +31,7 @@ final class TTSSettings: ObservableObject {
 
     private static let azureKeyKey = "tts.azure.key"
     private static let openAIKeyKey = "tts.openai.key"
+    private static let edgeTokenKey = "tts.edge.token"
 
     private let defaults = UserDefaults.standard
 
@@ -35,7 +40,9 @@ final class TTSSettings: ObservableObject {
         systemVoice = defaults.string(forKey: "tts.system.voice") ?? ""
         doubaoBaseURL = defaults.string(forKey: "tts.doubao.base") ?? ""
         doubaoSpeaker = defaults.string(forKey: "tts.doubao.speaker") ?? "温柔桃子"
-        edgeVoice = defaults.string(forKey: "tts.edge.voice") ?? "zh-CN-XiaoxiaoNeural"
+        edgeServerBaseURL = defaults.string(forKey: "tts.edge.base") ?? ""
+        edgeServerVoice = defaults.string(forKey: "tts.edge.voice") ?? "zh-CN-XiaoxiaoNeural"
+        edgeServerToken = Keychain.get(Self.edgeTokenKey)
         azureRegion = defaults.string(forKey: "tts.azure.region") ?? "eastasia"
         azureVoice = defaults.string(forKey: "tts.azure.voice") ?? "zh-CN-XiaoxiaoNeural"
         openAIBaseURL = defaults.string(forKey: "tts.openai.base") ?? "https://api.openai.com/v1"
@@ -53,8 +60,9 @@ final class TTSSettings: ObservableObject {
         case .doubao:
             guard !doubaoBaseURL.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
             return DoubaoTTSProvider(baseURL: doubaoBaseURL, speaker: doubaoSpeaker)
-        case .edge:
-            return EdgeTTSProvider()
+        case .edgeServer:
+            guard !edgeServerBaseURL.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return EdgeServerTTSProvider(baseURL: edgeServerBaseURL, token: edgeServerToken)
         case .azure:
             guard !azureKey.isEmpty, !azureRegion.isEmpty else { return nil }
             return AzureTTSProvider(region: azureRegion, key: azureKey)
@@ -70,7 +78,7 @@ final class TTSSettings: ObservableObject {
         switch kind {
         case .system: return systemVoice
         case .doubao: return doubaoSpeaker
-        case .edge: return edgeVoice
+        case .edgeServer: return edgeServerVoice
         case .azure: return azureVoice
         case .openAICompatible: return openAIVoice
         }
@@ -78,7 +86,8 @@ final class TTSSettings: ObservableObject {
 
     var isConfigured: Bool {
         switch kind {
-        case .system, .edge: return true
+        case .system: return true
+        case .edgeServer: return !edgeServerBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .doubao: return !doubaoBaseURL.trimmingCharacters(in: .whitespaces).isEmpty
         case .azure: return !azureKey.isEmpty && !azureRegion.isEmpty
         case .openAICompatible: return !openAIKey.isEmpty && !openAIBaseURL.isEmpty
@@ -100,6 +109,24 @@ final class TTSSettings: ObservableObject {
             clearError()
         } catch {
             doubaoStatus = "连接失败"
+            report(error)
+        }
+    }
+
+    /// 探测自建微软语音服务并拉取音色
+    func probeEdgeServer() async {
+        do {
+            let all = try await EdgeServerTTSProvider.voices(baseURL: edgeServerBaseURL,
+                                                             token: edgeServerToken)
+            let chinese = all.filter { $0.hasPrefix("zh") }
+            edgeServerVoices = chinese.isEmpty ? all : chinese
+            edgeServerStatus = "在线 · \(all.count) 个音色"
+            if !edgeServerVoices.contains(edgeServerVoice), let first = edgeServerVoices.first {
+                edgeServerVoice = first
+            }
+            clearError()
+        } catch {
+            edgeServerStatus = "连接失败"
             report(error)
         }
     }

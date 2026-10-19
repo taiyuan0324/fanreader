@@ -224,13 +224,37 @@ struct AppSettingsView: View {
                 Text("想更好听:系统设置 → 辅助功能 → 朗读内容 → 声音 → 中文,下载「高级/增强」音色后回到这里选择。完全离线、免费。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            case .edge:
-                Picker("音色", selection: $tts.edgeVoice) {
-                    ForEach(EdgeTTSProvider.chineseVoices, id: \.id) { voice in
-                        Text(voice.name).tag(voice.id)
+            case .edgeServer:
+                TextField("服务地址,如 http://主机IP:3000", text: $tts.edgeServerBaseURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                SecureField("服务端 TOKEN(没设就留空)", text: $tts.edgeServerToken)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                HStack {
+                    Button {
+                        Task { await tts.probeEdgeServer() }
+                    } label: {
+                        Label("检测并拉取音色", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    Spacer()
+                    Text(tts.edgeServerStatus)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if tts.edgeServerVoices.isEmpty {
+                    TextField("音色(如 zh-CN-XiaoxiaoNeural)", text: $tts.edgeServerVoice)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                } else {
+                    Picker("音色", selection: $tts.edgeServerVoice) {
+                        ForEach(tts.edgeServerVoices, id: \.self) { name in
+                            Text(EdgeVoiceNames.friendly(name)).tag(name)
+                        }
                     }
                 }
-                Text("实验性:微软 2026 年把校验升级为 v2 token,部分网络下会返回 403。失败会自动回退系统语音。")
+                Text("服务端跑 edge-tts 库,微软的 v2 校验由 Python 侧处理,App 不再受 403 影响。")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             case .azure:

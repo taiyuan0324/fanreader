@@ -3,7 +3,7 @@ import Foundation
 enum TTSProviderKind: String, CaseIterable, Identifiable {
     case system
     case doubao
-    case edge
+    case edgeServer
     case azure
     case openAICompatible
 
@@ -13,7 +13,7 @@ enum TTSProviderKind: String, CaseIterable, Identifiable {
         switch self {
         case .system: return "系统(离线)"
         case .doubao: return "豆包(自建服务)"
-        case .edge: return "Edge 语音(免费)"
+        case .edgeServer: return "微软语音(自建)"
         case .azure: return "Azure 语音"
         case .openAICompatible: return "OpenAI 兼容接口"
         }
@@ -27,8 +27,8 @@ enum TTSProviderKind: String, CaseIterable, Identifiable {
             return "使用 AVSpeechSynthesizer,无需网络与密钥"
         case .doubao:
             return "连接你自己搭建的豆包 TTS,填地址后自动拉取音色列表"
-        case .edge:
-            return "微软 Edge 朗读服务,无需密钥,中文音色接近豆包"
+        case .edgeServer:
+            return "连接你服务器上的 edge-tts 服务(/api/synthesis),由服务端处理微软最新的校验"
         case .azure:
             return "填写区域(如 eastasia)与语音(如 zh-CN-XiaoxiaoNeural)"
         case .openAICompatible:

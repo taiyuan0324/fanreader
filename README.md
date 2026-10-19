@@ -4,7 +4,7 @@
 
 [![build](https://github.com/taiyuan0324/fanreader/actions/workflows/build.yml/badge.svg)](https://github.com/taiyuan0324/fanreader/actions/workflows/build.yml)
 
-当前版本 **0.4.1**。CI:macos-15 + Xcode 16,约 2 分钟产出未签名 IPA,零编译警告。
+当前版本 **0.5.0**。CI:macos-15 + Xcode 16,约 2 分钟产出未签名 IPA,零编译警告。
 
 ## 功能
 
@@ -30,7 +30,8 @@
 - 可开关页眉(书名/章节)与页脚(章节序号/页码/百分比),工具栏隐藏时才出现
 
 **朗读**
-- 五种引擎:**豆包(自建服务)**、系统离线、Edge 语音(免费)、Azure 语音、OpenAI 兼容 `/audio/speech`
+- 五种引擎:**微软语音(自建)**、**豆包(自建)**、系统离线、Azure 语音、OpenAI 兼容 `/audio/speech`
+- 微软语音自建:指向服务器上的 `edge-tts-server`(`GET /api/synthesis`),微软的 v2 校验在服务端处理
 - 豆包自建:在设置里填你自己的服务地址(如 `http://<主机>:3456`),音色列表自动拉取、支持连接检测,按 260 字合并请求
 - Edge 语音内置 10 个中文音色(晓晓/云希/云健/粤语/台湾…),基于 WebSocket 协议独立实现;微软已升级 v2 token 校验,该通道标记为实验性
 - 系统朗读支持挑选已下载的「增强/高级」音色(完全离线、免费),未选择时自动取最优
