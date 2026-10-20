@@ -137,11 +137,14 @@ struct ReaderView: View {
 
             Group {
                 if settings.pageMode == .curl {
-                    // 自研双面翻转:整屏覆盖,正反面同色,阴影与玻璃高光可控
-                    FlipPager(count: model.pages.count + 2,
-                              index: $displayIndex,
-                              content: { slot in AnyView(slotView(slot, pageSize: pageSize)) },
-                              pageBackground: settings.theme.background)
+                    // Metal 真卷页(PageCurlKit):整屏卷起,正反面同纸色
+                    PageCurlPager(count: model.pages.count + 2,
+                                  index: $displayIndex,
+                                  paper: settings.theme.uiBackground,
+                                  makePage: { slot, size in
+                                      AnyView(slotView(slot, pageSize: CGSize(width: max(size.width - settings.margin * 2, 80),
+                                                                               height: max(size.height - 82, 80))))
+                                  })
                 } else {
                     TabView(selection: $displayIndex) {
                         ForEach(0..<(model.pages.count + 2), id: \.self) { slot in

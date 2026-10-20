@@ -2,24 +2,30 @@ name: FanReader
 options:
   bundleIdPrefix: com.example
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   createIntermediateGroups: true
+packages:
+  PageCurlKit:
+    url: https://github.com/Orshanski/PageCurlKit
+    from: "1.0.0"
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 targets:
   FanReader:
     type: application
     platform: iOS
     sources:
       - path: Sources
+    dependencies:
+      - package: PageCurlKit
     info:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: 翻页
-        CFBundleShortVersionString: "0.9.15"
-        CFBundleVersion: "41"
+        CFBundleShortVersionString: "0.9.16"
+        CFBundleVersion: "42"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
