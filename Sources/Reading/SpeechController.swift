@@ -11,6 +11,8 @@ struct SpeechConfig {
     var prefetch: Int = 6
     /// 1.0 = 正常语速,3.0 = 三倍
     var multiplier: Double = 1.0
+    var bookTitle: String = ""
+    var chapterTitle: String = ""
 }
 
 /// 朗读统一入口。
@@ -27,10 +29,18 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
     @Published private(set) var servedEngine: String = ""
 
     var onError: ((Error) -> Void)?
+    var onRemoteNextChapter: (() -> Void)?
+    var onRemotePreviousChapter: (() -> Void)?
     /// 整章读完(或从起点读到底)
     var onChapterFinished: (() -> Void)?
 
     private let synthesizer = AVSpeechSynthesizer()
+
+    // 锁屏/控制中心
+    private var lastText = ""
+    private var lastConfig: SpeechConfig?
+    private var chunkLocations: [Int] = []
+    private var pausedRange: NSRange?
 
     // 系统语音的分块队列
     private var systemChunks: [SpeechChunk] = []
@@ -42,6 +52,42 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
     override init() {
         super.init()
         synthesizer.delegate = self
+        configureRemoteCommands()
+        observeInterruptions()
+    }
+
+    private func configureRemoteCommands() {
+        let center = NowPlayingCenter.shared
+        center.onPlay = { [weak self] in
+            Task { @MainActor in self?.resumeFromRemote() }
+        }
+        center.onPause = { [weak self] in
+            Task { @MainActor in self?.pause() }
+        }
+        center.onNextChapter = { [weak self] in
+            Task { @MainActor in self?.onRemoteNextChapter?() }
+        }
+        center.onPreviousChapter = { [weak self] in
+            Task { @MainActor in self?.onRemotePreviousChapter?() }
+        }
+        center.onSeek = { [weak self] unit in
+            Task { @MainActor in self?.seek(toUnit: unit) }
+        }
+    }
+
+    private func observeInterruptions() {
+        NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { [weak self] note in
+            guard let self,
+                  let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
+            if type == .began {
+                Task { @MainActor in self.pause() }
+            }
+        }
     }
 
     // MARK: - 对外
@@ -55,6 +101,13 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
                                           maxLength: Self.chunkLength(for: config.providerKind))
         guard !chunks.isEmpty else { return }
         isSpeaking = true
+
+        lastText = text
+        lastConfig = config
+        chunkLocations = chunks.map { $0.range.location }
+        NowPlayingCenter.shared.activate(title: config.bookTitle,
+                                         chapter: config.chapterTitle,
+                                         total: chunks.count)
 
         if let provider = config.onlineProvider {
             activeEngine = config.providerName
@@ -85,6 +138,9 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
                     guard let self else { return }
                     self.currentRange = chunk.range
                     self.progressText = "\(index + 1)/\(chunks.count) 段"
+                    NowPlayingCenter.shared.update(elapsed: Double(index),
+                                                   total: chunks.count,
+                                                   isPlaying: true)
                     if config.providerKind == .doubao {
                         self.servedEngine = TTSEngineTrace.shared.current
                     }
@@ -108,7 +164,36 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
         speakNextSystemChunk()
     }
 
+    /// 暂停(保留锁屏控制器,可远程继续)
+    func pause() {
+        pausedRange = currentRange
+        isSpeaking = false
+        OnlineSpeechReader.shared.stop()
+        systemActive = false
+        if synthesizer.isSpeaking {
+            synthesizer.stopSpeaking(at: .immediate)
+        }
+        NowPlayingCenter.shared.update(elapsed: Double(chunkLocations.firstIndex(of: pausedRange?.location ?? -1) ?? 0),
+                                       total: max(chunkLocations.count, 1),
+                                       isPlaying: false)
+    }
+
+    private func resumeFromRemote() {
+        guard !isSpeaking, !lastText.isEmpty, let config = lastConfig else { return }
+        let offset = pausedRange?.location ?? 0
+        pausedRange = nil
+        speakChapter(lastText, from: offset, config: config)
+    }
+
+    private func seek(toUnit unit: Double) {
+        guard !lastText.isEmpty, let config = lastConfig, !chunkLocations.isEmpty else { return }
+        let index = min(max(Int(unit.rounded()), 0), chunkLocations.count - 1)
+        speakChapter(lastText, from: chunkLocations[index], config: config)
+    }
+
     func stop() {
+        NowPlayingCenter.shared.deactivate()
+        pausedRange = nil
         OnlineSpeechReader.shared.stop()
         systemActive = false
         systemChunks = []

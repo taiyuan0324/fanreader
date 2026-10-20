@@ -727,8 +727,13 @@ struct ReaderView: View {
                                                          providerKind: tts.kind,
                                                          providerName: tts.kind == .system ? "系统" : tts.kind.name,
                                                          prefetch: Int(settings.prefetchCount),
-                                                         multiplier: settings.normalizedMultiplier))
+                                                         multiplier: settings.normalizedMultiplier,
+                                                         bookTitle: model.book.title,
+                                                         chapterTitle: model.chapterTitle))
         }
+
+        speech.onRemoteNextChapter = { jumpChapter(1) }
+        speech.onRemotePreviousChapter = { jumpChapter(-1) }
 
         speech.speakChapter(text,
                             from: offset,
@@ -738,7 +743,9 @@ struct ReaderView: View {
                                                  providerKind: tts.kind,
                                                  providerName: tts.kind == .system ? "系统" : tts.kind.name,
                                                  prefetch: Int(settings.prefetchCount),
-                                                 multiplier: settings.normalizedMultiplier))
+                                                 multiplier: settings.normalizedMultiplier,
+                                                 bookTitle: model.book.title,
+                                                 chapterTitle: model.chapterTitle))
     }
 
     private func relayout(pageSize: CGSize) {
@@ -752,7 +759,7 @@ struct ReaderView: View {
 
     private func toggleSpeech() {
         if speech.isSpeaking {
-            speech.stop()
+            speech.pause()
             return
         }
         guard isListening else { return }

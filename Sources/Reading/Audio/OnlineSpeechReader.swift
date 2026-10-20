@@ -179,9 +179,15 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
 
     private func activateSession() async {
         let session = AVAudioSession.sharedInstance()
-        // 听书独占音频,不去压低/混合其它 App 的声音
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [])
-        try? session.setActive(true)
+        do {
+            // 独占播放:会中断后台音乐,并把控制权交给本 App
+            try session.setCategory(.playback, mode: .spokenAudio, options: [])
+            try session.setActive(true, options: [])
+        } catch {
+            // 兜底:去掉 mode 再试一次(部分机型不允许 spokenAudio)
+            try? session.setCategory(.playback)
+            try? session.setActive(true)
+        }
     }
 
     private func playAudio(_ data: Data, rate: Double = 1.0) async {
