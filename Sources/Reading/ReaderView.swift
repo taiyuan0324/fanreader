@@ -26,12 +26,22 @@ struct ReaderView: View {
     @State private var lastLoggedChunk = ""
     /// 书签操作后的短暂提示
     @State private var toastText: String?
+    /// 阅读器级唯一时钟:所有页面共享一个字符串,页面里不再挂 Timer
+    @State private var timeText = "--:--"
 
     private let headerHeight: CGFloat = 26
     private let footerHeight: CGFloat = 44
 
     init(book: Book, fileURL: URL) {
         _model = StateObject(wrappedValue: ReaderModel(book: book, fileURL: fileURL))
+    }
+
+    private let clockTimer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
+
+    private func refreshClock() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        timeText = formatter.string(from: Date())
     }
 
     var body: some View {
@@ -53,7 +63,8 @@ struct ReaderView: View {
             toastOverlay
         }
         .animation(.easeInOut(duration: 0.2), value: chromeVisible)
-        .onAppear { applyWindowBackground() }
+        .onAppear { applyWindowBackground(); refreshClock() }
+        .onReceive(clockTimer) { _ in refreshClock() }
         .onChange(of: settings.theme) { _ in applyWindowBackground() }
         .overlay(alignment: .leading) { backEdge }
         .simultaneousGesture(pullDownBookmarkGesture)
@@ -177,6 +188,13 @@ struct ReaderView: View {
             .onChange(of: model.pageIndex) { newValue in
                 let target = newValue + 1
                 if displayIndex != target, target <= model.pages.count {
+                    displayIndex = target
+                }
+            }
+            .onChange(of: model.pages.count) { _ in
+                // 异步分页完成后,把下标拉回合法区间
+                let target = model.pageIndex + 1
+                if displayIndex != target, target >= 1, target <= model.pages.count {
                     displayIndex = target
                 }
             }
@@ -417,7 +435,7 @@ struct ReaderView: View {
                 Spacer(minLength: 90)
 
                 HStack(spacing: 8) {
-                    Text(Date(), style: .time)
+                    Text(timeText)
                         .font(.system(size: 12))
                         .monospacedDigit()
                     Text("\(Int(model.bookProgress * 100))%")
@@ -645,11 +663,10 @@ struct ReaderView: View {
         speech.stop()
         if delta > 0 {
             model.nextChapter()
+        } else if landOnLastPage {
+            model.previousChapter(landOnLastPage: true)
         } else {
             model.previousChapter()
-        }
-        if landOnLastPage {
-            model.pageIndex = max(model.pages.count - 1, 0)
         }
         displayIndex = model.pageIndex + 1
 
@@ -702,6 +719,7 @@ struct ReaderView: View {
         hasher.combine(Int(pageSize.height))
         hasher.combine(Int(settings.fontSize * 10))
         hasher.combine(settings.theme.rawValue)
+        hasher.combine(model.previewStamp)
         return hasher.finalize()
     }
 
@@ -743,7 +761,7 @@ struct ReaderView: View {
             HStack {
                 Text("—")
                 Spacer()
-                Text(Date(), style: .time)
+                Text(timeText)
                     .monospacedDigit()
             }
             .font(.system(size: max(9, settings.fontSize / 2)))

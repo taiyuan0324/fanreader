@@ -135,13 +135,11 @@ final class ReaderModel: ObservableObject {
         let sameAttributes = NSDictionary(dictionary: attributes).isEqual(to: layoutAttributes ?? [:])
         if sameSize, sameAttributes, !pages.isEmpty, cachedChapterText == chapter.text { return }
 
-        let previous = pageIndex
         layoutSize = size
         layoutAttributes = attributes
         cachedChapterText = chapter.text
-
-        rebuildPages(chapter: chapter, attributes: attributes, size: size)
-        pageIndex = keepPage ? min(previous, max(pages.count - 1, 0)) : 0
+        keepPageAfterPagination = keepPage
+        schedulePagination(chapter: chapter)
     }
 
     private func rebuildPages(chapter: Chapter,
@@ -198,7 +196,7 @@ final class ReaderModel: ObservableObject {
         let index = chapterIndex + offset
         guard document.chapters.indices.contains(index) else { return nil }
 
-        let key = "\(index)-\(last)-\(Int(size.width))x\(Int(size.height))"
+        let key = "\(offset):\(last ? "last" : "first")"
         if let cached = previewCache[key] { return cached }
 
         let attributed = NSAttributedString(string: document.chapters[index].text, attributes: attributes)
@@ -253,15 +251,127 @@ final class ReaderModel: ObservableObject {
     }
 
     private func rebuildPages() {
-        guard let chapter = currentChapter, layoutSize != .zero, let attributes = layoutAttributes else {
+        guard let chapter = currentChapter else {
             pages = []
             pageRanges = []
             return
         }
         cachedChapterText = chapter.text
         clearPreviewCache()
-        rebuildPages(chapter: chapter, attributes: attributes, size: layoutSize)
-        pageIndex = min(pageIndex, max(pages.count - 1, 0))
+        schedulePagination(chapter: chapter)
+    }
+
+    // MARK: - 后台分页
+
+    private var paginationTask: Task<Void, Never>?
+    private var keepPageAfterPagination = true
+    private(set) var previewStamp = 0
+
+    /// 整章分页 + 邻章预览全部在后台算,主线程只收 NSRange 与成品子串
+    private func schedulePagination(chapter: Chapter) {
+        paginationTask?.cancel()
+        guard let size = layoutSize,
+              let attributes = layoutAttributes,
+              size.width > 1, size.height > 1 else { return }
+
+        let previousIndex = pageIndex
+        let keepPage = keepPageAfterPagination
+        keepPageAfterPagination = true
+
+        // 邻章文本一起带进后台
+        let document = self.document
+        let chapterIndex = chapterIndex
+        let prevText: String? = {
+            guard let document, document.chapters.indices.contains(chapterIndex - 1) else { return nil }
+            return document.chapters[chapterIndex - 1].text
+        }()
+        let nextText: String? = {
+            guard let document, document.chapters.indices.contains(chapterIndex + 1) else { return nil }
+            return document.chapters[chapterIndex + 1].text
+        }()
+
+        paginationTask = Task { [weak self] in
+            let ranges = await Paginator.rangesAsync(text: chapter.text,
+                                                     attributes: attributes,
+                                                     size: size)
+            guard !Task.isCancelled else { return }
+
+            // 邻章只取首页/末页,一并预渲染,翻到章末零停顿
+            var previousPage: NSAttributedString?
+            var nextPage: NSAttributedString?
+            if let prevText {
+                let r = await Paginator.rangesAsync(text: prevText, attributes: attributes, size: size)
+                if let last = r.last {
+                    let full = NSAttributedString(string: prevText, attributes: attributes)
+                    previousPage = full.attributedSubstring(from: last)
+                }
+            }
+            if let nextText {
+                let r = await Paginator.rangesAsync(text: nextText, attributes: attributes, size: size)
+                if let first = r.first {
+                    let full = NSAttributedString(string: nextText, attributes: attributes)
+                    nextPage = full.attributedSubstring(from: first)
+                }
+            }
+            guard !Task.isCancelled else { return }
+
+            let full = NSAttributedString(string: chapter.text, attributes: attributes)
+            let fullText = chapter.text as NSString
+
+            await MainActor.run {
+                guard let self, !Task.isCancelled else { return }
+                self.apply(ranges: ranges,
+                           full: full,
+                           fullText: fullText,
+                           previousPage: previousPage,
+                           nextPage: nextPage,
+                           targetPageIndex: keepPage ? previousIndex : 0)
+            }
+        }
+    }
+
+    @MainActor
+    private func apply(ranges: [NSRange],
+                       full: NSAttributedString,
+                       fullText: NSString,
+                       previousPage: NSAttributedString?,
+                       nextPage: NSAttributedString?,
+                       targetPageIndex: Int) {
+        pageRanges = ranges
+        pages = ranges.map { range in
+            let slice = NSMutableAttributedString(attributedString: full.attributedSubstring(from: range))
+            if range.location > 0 {
+                let before = fullText.substring(with: NSRange(location: range.location - 1, length: 1))
+                if before != "\n" {
+                    let whole = NSRange(location: 0, length: slice.length)
+                    slice.enumerateAttribute(.paragraphStyle, in: whole) { value, attrRange, _ in
+                        guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+                        style.firstLineHeadIndent = 0
+                        slice.addAttribute(.paragraphStyle, value: style, range: attrRange)
+                    }
+                }
+            }
+            return slice
+        }
+
+        previewCache = [:]
+        if let previousPage { previewCache["-1:last"] = previousPage }
+        if let nextPage { previewCache["1:first"] = nextPage }
+        previewStamp += 1
+
+        pageIndex = min(targetPageIndex, max(pages.count - 1, 0))
+        if landOnLastPageAfterPagination {
+            landOnLastPageAfterPagination = false
+            pageIndex = max(pages.count - 1, 0)
+        }
+    }
+
+    /// 上一章落地在末页(异步分页完成后生效)
+    private var landOnLastPageAfterPagination = false
+
+    func previousChapter(landOnLastPage: Bool) {
+        landOnLastPageAfterPagination = landOnLastPage
+        goToChapter(chapterIndex - 1)
     }
 
     // MARK: - 坐标映射(朗读/高亮共用)
