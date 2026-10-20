@@ -169,6 +169,7 @@ enum ReaderTextAlignment: String, CaseIterable, Identifiable {
 
 enum ReaderPageMode: String, CaseIterable, Identifiable {
     case slide
+    case curl
     case scroll
 
     var id: String { rawValue }
@@ -176,6 +177,7 @@ enum ReaderPageMode: String, CaseIterable, Identifiable {
     var name: String {
         switch self {
         case .slide: return "左右翻页"
+        case .curl: return "仿真翻页"
         case .scroll: return "上下滚动"
         }
     }

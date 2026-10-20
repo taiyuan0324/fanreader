@@ -21,10 +21,11 @@ struct ReaderView: View {
     @State private var speechChapter = -1
     @State private var showPanel = false
     @State private var showSettings = false
-    @State private var showThemeQuickBar = false
     @State private var scrollOffset: CGFloat = 0
     @State private var speechError: String?
     @State private var lastLoggedChunk = ""
+    /// 书签操作后的短暂提示
+    @State private var toastText: String?
 
     private let headerHeight: CGFloat = 26
     private let footerHeight: CGFloat = 26
@@ -38,7 +39,11 @@ struct ReaderView: View {
             settings.theme.background.ignoresSafeArea()
             content
             chrome
+            floatingBall
+            toastOverlay
         }
+        .overlay(alignment: .leading) { backEdge }
+        .simultaneousGesture(pullDownBookmarkGesture)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .statusBarHidden(!chromeVisible)
@@ -109,38 +114,22 @@ struct ReaderView: View {
             let pageSize = CGSize(width: max(proxy.size.width - settings.margin * 2, 80),
                                   height: max(proxy.size.height - insets, 80))
 
-            TabView(selection: $displayIndex) {
-                chapterBoundary(title: "上一章")
-                    .tag(0)
-
-                ForEach(Array(model.pages.enumerated()), id: \.offset) { index, page in
-                    CoreTextPage(
-                        attributedText: page,
-                        highlightRange: localHighlight(pageIndex: index),
-                        highlightColor: highlightColor,
-                        onSingleTap: { fraction in
-                            if fraction < 0.3 {
-                                model.previousPage()
-                            } else if fraction > 0.7 {
-                                model.nextPage()
-                            } else {
-                                withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() }
-                            }
-                        },
-                        onDoubleTap: { charIndex in
-                            // 只有听书态才响应双击,阅读态保持纯阅读
-                            guard isListening else { return }
-                            startSpeech(fromPage: index, charIndex: charIndex)
+            Group {
+                if settings.pageMode == .curl {
+                    CurlPager(count: model.pages.count + 2,
+                              index: $displayIndex,
+                              pageBackground: settings.theme.uiBackground,
+                              content: { slot in AnyView(slotView(slot, pageSize: pageSize)) })
+                } else {
+                    TabView(selection: $displayIndex) {
+                        ForEach(0..<(model.pages.count + 2), id: \.self) { slot in
+                            slotView(slot, pageSize: pageSize)
+                                .tag(slot)
                         }
-                    )
-                    .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
-                    .tag(index + 1)
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
                 }
-
-                chapterBoundary(title: "下一章")
-                    .tag(model.pages.count + 1)
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
             .padding(.horizontal, settings.margin)
             .padding(.top, settings.showHeaderFooter ? headerHeight + 10 : 12)
             .padding(.bottom, settings.showHeaderFooter ? footerHeight + 6 : 12)
@@ -168,6 +157,41 @@ struct ReaderView: View {
                     displayIndex = target
                 }
             }
+        }
+    }
+
+    /// 单个槽位:0 = 上一章占位,count+1 = 下一章占位,其余是正文页
+    @ViewBuilder
+    private func slotView(_ slot: Int, pageSize: CGSize) -> some View {
+        if slot == 0 {
+            chapterBoundary(title: "上一章")
+        } else if slot == model.pages.count + 1 {
+            chapterBoundary(title: "下一章")
+        } else {
+            let index = slot - 1
+            let page = model.pages.indices.contains(index)
+                ? model.pages[index]
+                : NSAttributedString(string: "")
+
+            CoreTextPage(
+                attributedText: page,
+                highlightRange: localHighlight(pageIndex: index),
+                highlightColor: highlightColor,
+                onSingleTap: { fraction in
+                    if fraction < 0.3 {
+                        model.previousPage()
+                    } else if fraction > 0.7 {
+                        model.nextPage()
+                    } else {
+                        withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() }
+                    }
+                },
+                onDoubleTap: { charIndex in
+                    guard isListening else { return }
+                    startSpeech(fromPage: index, charIndex: charIndex)
+                }
+            )
+            .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
         }
     }
 
@@ -199,13 +223,10 @@ struct ReaderView: View {
     @ViewBuilder
     private var chrome: some View {
         VStack(spacing: 0) {
-            if settings.showHeaderFooter && !chromeVisible {
+            if settings.showHeaderFooter {
                 headerBar
             }
             Spacer(minLength: 0)
-            if settings.showHeaderFooter && !chromeVisible {
-                footerBar
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .allowsHitTesting(false)
@@ -213,43 +234,28 @@ struct ReaderView: View {
             if chromeVisible { topBar.transition(.move(edge: .top).combined(with: .opacity)) }
         }
         .overlay(alignment: .bottom) {
-            if chromeVisible { bottomBar.transition(.move(edge: .bottom).combined(with: .opacity)) }
+            bottomBar
         }
         .animation(.easeInOut(duration: 0.2), value: chromeVisible)
     }
 
     private var headerBar: some View {
-        HStack {
-            Text(model.book.title)
-                .font(.system(size: 10))
-                .foregroundStyle(settings.theme.secondaryColor)
-                .lineLimit(1)
-            Spacer()
+        HStack(spacing: 8) {
             Text(model.chapterTitle)
-                .font(.system(size: 10))
-                .foregroundStyle(settings.theme.secondaryColor)
+                .font(.system(size: max(9, settings.fontSize / 2)))
                 .lineLimit(1)
+
+            Spacer(minLength: 10)
+
+            Text(Date(), style: .time)
+                .font(.system(size: max(9, settings.fontSize / 2)))
+                .monospacedDigit()
+
+            BatteryLabel()
         }
+        .foregroundStyle(settings.theme.secondaryColor)
         .padding(.horizontal, settings.margin)
         .frame(height: headerHeight)
-        .allowsHitTesting(false)
-    }
-
-    private var footerBar: some View {
-        HStack {
-            Text(model.isPDF ? "PDF" : "第 \(model.chapterIndex + 1)/\(max(model.chapterCount, 1)) 章")
-                .font(.system(size: 10))
-                .foregroundStyle(settings.theme.secondaryColor)
-            Spacer()
-            Text(model.isPDF
-                 ? "\(model.currentPageNumber)/\(max(model.pageCount, 1))"
-                 : "\(model.currentPageNumber)/\(max(model.pageCount, 1))  ·  \(Int(model.progress * 100))%")
-                .font(.system(size: 10))
-                .monospacedDigit()
-                .foregroundStyle(settings.theme.secondaryColor)
-        }
-        .padding(.horizontal, settings.margin)
-        .frame(height: footerHeight)
         .allowsHitTesting(false)
     }
 
@@ -317,171 +323,245 @@ struct ReaderView: View {
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 4) {
             if isListening {
-                listeningBar
+                listeningFooter
             }
 
             if chromeVisible {
-                ProgressView(value: model.progress)
-                    .tint(.accentColor)
-                    .padding(.horizontal, 18)
-                    .padding(.top, 6)
-
-                HStack(spacing: 22) {
-                    Button {
-                        jumpChapter(-1)
-                    } label: {
-                        Image(systemName: "chevron.left.2")
-                    }
-                    .disabled(model.isPDF || model.chapterIndex == 0)
-
-                    Button {
-                        toggleSpeech()
-                    } label: {
-                        Image(systemName: speech.isSpeaking ? "pause.circle.fill" : "play.circle")
-                            .font(.title3)
-                    }
-                    .disabled(model.isPDF || !isListening)
-
-                    Spacer()
-
-                    Button {
-                        settings.fontSize = max(12, settings.fontSize - 1)
-                    } label: {
-                        Image(systemName: "textformat.size.smaller")
-                    }
-                    Button {
-                        settings.fontSize = min(32, settings.fontSize + 1)
-                    } label: {
-                        Image(systemName: "textformat.size.larger")
-                    }
-
-                    Button {
-                        jumpChapter(1)
-                    } label: {
-                        Image(systemName: "chevron.right.2")
-                    }
-                    .disabled(model.isPDF || model.chapterIndex >= model.chapterCount - 1)
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 4)
+                progressRow
+                functionRow
             }
 
-            // 常驻状态行(参考图底部:左页码 / 右时间)
-            HStack {
-                Text(model.isPDF ? "\(model.currentPageNumber)/\(max(model.pageCount, 1))"
-                                 : "\(model.currentPageNumber)/\(max(model.pageCount, 1))")
-                    .font(.system(size: 10))
-                    .monospacedDigit()
-                    .foregroundStyle(settings.theme.secondaryColor)
-
-                Spacer()
-
-                if isListening {
-                    Text(speechLabel)
-                        .font(.system(size: 10))
-                        .foregroundStyle(settings.theme.secondaryColor)
-                    Spacer()
-                }
-
-                Text(Date(), style: .time)
-                    .font(.system(size: 10))
-                    .monospacedDigit()
-                    .foregroundStyle(settings.theme.secondaryColor)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 5)
+            persistentFooter
         }
+        .padding(.top, 2)
         .background(.ultraThinMaterial)
     }
 
-    /// 听书态:上一章 / 暂停 / 下一章
-    private var listeningBar: some View {
-        HStack(spacing: 0) {
-            Button {
-                jumpChapter(-1)
-            } label: {
+    /// 上一章 / 进度条 / 下一章
+    private var progressRow: some View {
+        HStack(spacing: 12) {
+            Button { jumpChapter(-1) } label: {
                 Text("上一章").font(.system(size: 12))
             }
-            .frame(maxWidth: .infinity)
-            .disabled(model.chapterIndex == 0)
+            .disabled(model.chapterIndex <= 0)
 
-            Button {
-                toggleSpeech()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: speech.isSpeaking ? "pause.fill" : "play.fill")
-                        .font(.system(size: 11))
-                    Text(speech.isSpeaking ? "暂停播放" : "继续播放")
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 7)
-                .background(Capsule().fill(Color.primary.opacity(0.10)))
-            }
-            .buttonStyle(.plain)
+            ProgressView(value: model.progress)
+                .tint(.accentColor)
 
-            Button {
-                jumpChapter(1)
-            } label: {
+            Button { jumpChapter(1) } label: {
                 Text("下一章").font(.system(size: 12))
             }
-            .frame(maxWidth: .infinity)
             .disabled(model.chapterIndex >= model.chapterCount - 1)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
+        .padding(.horizontal, 18)
+        .padding(.top, 4)
     }
 
-    private var themeQuickBar: some View {
-        HStack(spacing: 10) {
-            ForEach(ReaderTheme.allCases) { theme in
-                Button {
-                    settings.theme = theme
-                } label: {
-                    Circle()
-                        .fill(theme.background)
-                        .frame(width: 26, height: 26)
-                        .overlay(Circle().stroke(Color.primary.opacity(theme == settings.theme ? 0.9 : 0.15),
-                                                 lineWidth: theme == settings.theme ? 2 : 1))
-                        .overlay(
-                            Text("A")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(theme.textColor)
-                        )
+    /// 功能区:阅读态 目录/主题/翻页/布局/听书;听书态 播放暂停/停止
+    private var functionRow: some View {
+        HStack(spacing: 0) {
+            if isListening {
+                functionButton("播放/暂停", speech.isSpeaking ? "pause.circle" : "play.circle") {
+                    toggleSpeech()
+                }
+                functionButton("停止播放", "stop.circle") {
+                    stopListening()
+                }
+            } else {
+                functionButton("目录", "list.bullet") { showPanel = true }
+                functionButton("主题", "circle.lefthalf.filled") { showSettings = true }
+                functionButton("翻页", "rectangle.on.rectangle") { cyclePageMode() }
+                functionButton("布局", "textformat") { showSettings = true }
+                functionButton("听书", "headphones") { toggleListening() }
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.bottom, 2)
+    }
+
+    private func functionButton(_ title: String,
+                                _ icon: String,
+                                action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 17))
+                Text(title).font(.system(size: 10))
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundStyle(settings.theme.textColor.opacity(0.85))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 听书页脚:播放/暂停居中;播放位置不在本页时给出两个选择
+    private var listeningFooter: some View {
+        VStack(spacing: 4) {
+            if !isPlaybackOnCurrentPage {
+                HStack(spacing: 10) {
+                    Button { returnToPlayback() } label: {
+                        Text("返回原进度")
+                            .font(.system(size: 12))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.primary.opacity(0.08)))
+                    }
+                    Button { listenFromCurrentPage() } label: {
+                        Text("从本页听")
+                            .font(.system(size: 12))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(Color.accentColor.opacity(0.16)))
+                    }
                 }
                 .buttonStyle(.plain)
+                .padding(.top, 4)
             }
+
+            Button { toggleSpeech() } label: {
+                Image(systemName: speech.isSpeaking ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 30))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 2)
+        }
+    }
+
+    /// 常驻页脚:页码 + 百分比(字号为正文一半)
+    private var persistentFooter: some View {
+        HStack {
+            Text("\(model.currentPageNumber)/\(max(model.pageCount, 1))")
             Spacer()
-            Button {
-                withAnimation { showThemeQuickBar = false }
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
+            Text("\(Int(model.progress * 100))%")
+        }
+        .font(.system(size: max(9, settings.fontSize / 2)))
+        .monospacedDigit()
+        .foregroundStyle(settings.theme.secondaryColor)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - 悬浮球 / 手势 / 提示
+
+    /// 阅读态在左、听书态在右的悬浮球
+    @ViewBuilder
+    private var floatingBall: some View {
+        HStack {
+            if !isListening { ballContent.padding(.leading, 10) }
+            Spacer()
+            if isListening { ballContent.padding(.trailing, 10) }
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private var ballContent: some View {
+        Button { toggleListening() } label: {
+            Image(systemName: isListening
+                  ? (speech.isSpeaking ? "pause.fill" : "play.fill")
+                  : "headphones")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
+                .background(Circle().fill(Color.accentColor.opacity(0.9)))
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var toastOverlay: some View {
+        if let toastText {
+            Text(toastText)
+                .font(.system(size: 13))
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(Capsule().fill(.ultraThinMaterial))
+                .offset(y: -120)
+                .transition(.opacity)
+        }
+    }
+
+    /// 左侧 22pt 边缘右滑 = 返回书架
+    private var backEdge: some View {
+        Color.clear
+            .frame(width: 22)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 15)
+                    .onEnded { value in
+                        guard value.translation.width > 60,
+                              abs(value.translation.height) < 90 else { return }
+                        persist()
+                        dismiss()
+                    }
+            )
+    }
+
+    /// 下拉 = 添加/删除当前页书签(上下滚动模式不启用)
+    private var pullDownBookmarkGesture: some Gesture {
+        DragGesture(minimumDistance: 40)
+            .onEnded { value in
+                guard settings.pageMode != .scroll, !model.isPDF else { return }
+                let dy = value.translation.height
+                let dx = value.translation.width
+                guard dy > 80, abs(dy) > abs(dx) * 1.6 else { return }
+                toggleBookmarkAtCurrentPage()
             }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
     }
 
-    /// 底栏文案:朗读中显示进度;豆包被服务端降级成微软时给出提示
-    private var speechLabel: String {
-        guard speech.isSpeaking, !speech.progressText.isEmpty else { return pageLabel }
-        if tts.kind == .doubao,
-           !speech.servedEngine.isEmpty,
-           speech.servedEngine != "doubao" {
-            return "\(speech.progressText) · 已降级微软"
+    private func toggleBookmarkAtCurrentPage() {
+        let existing = bookmarkStore.bookmarks(for: model.book.id).first {
+            $0.chapterIndex == model.chapterIndex && $0.pageIndex == model.pageIndex
         }
-        return speech.progressText
+        if let existing {
+            bookmarkStore.remove(existing)
+            showToast("已删除本页书签")
+        } else {
+            addBookmark()
+            showToast("已添加书签")
+        }
     }
 
-    private var pageLabel: String {
-        if model.isPDF || settings.pageMode == .slide {
-            return "\(model.currentPageNumber)/\(max(model.pageCount, 1))"
+    private func showToast(_ text: String) {
+        withAnimation(.easeInOut(duration: 0.15)) { toastText = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.easeInOut(duration: 0.2)) { toastText = nil }
         }
-        return "滚动 · \(Int(model.progress * 100))%"
+    }
+
+    // MARK: - 听书位置
+
+    private var playbackPageIndex: Int? {
+        guard let range = speech.currentRange else { return nil }
+        return model.pageIndex(containing: range.location)
+    }
+
+    private var isPlaybackOnCurrentPage: Bool {
+        guard let page = playbackPageIndex else { return true }
+        return page == model.pageIndex
+    }
+
+    private func returnToPlayback() {
+        guard let page = playbackPageIndex else { return }
+        model.pageIndex = page
+        displayIndex = page + 1
+    }
+
+    private func listenFromCurrentPage() {
+        speakChapter(from: currentPageStartOffset)
+    }
+
+    private func stopListening() {
+        speech.stop()
+        isListening = false
+    }
+
+    private func cyclePageMode() {
+        let all = ReaderPageMode.allCases
+        guard let index = all.firstIndex(of: settings.pageMode) else { return }
+        settings.pageMode = all[(index + 1) % all.count]
+        showToast(settings.pageMode.name)
     }
 
     // MARK: - 交互
