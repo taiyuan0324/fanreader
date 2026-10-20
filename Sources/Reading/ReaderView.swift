@@ -248,8 +248,8 @@ struct ReaderView: View {
 
     /// 页眉页脚占用的高度,分页时要扣掉,否则最后一页会被裁
     private func pageInsets(full: CGSize) -> CGFloat {
-        // 页眉 26 + 页脚 46 + 顶部留白 10
-        let chrome: CGFloat = 82
+        // 页眉 26 + 页脚 46 + 顶部留白 10 + 悬浮按钮区 22
+        let chrome: CGFloat = 104
         return full.height * 0.02 + chrome
     }
 
@@ -265,7 +265,7 @@ struct ReaderView: View {
                 if !isListening { listenCircle }
             }
             .padding(.horizontal, 18)
-            .padding(.bottom, max(22, settings.fontSize * 1.4))
+            .padding(.bottom, max(30, settings.fontSize * 1.6))
 
             // 面板:从这里开始铺底色
             VStack(spacing: 0) {
