@@ -189,9 +189,9 @@ struct ReaderView: View {
             if model.pages.isEmpty {
                 Color.clear
             } else if slot == 0 {
-                chapterBoundary(title: "上一章")
+                crossChapterPage(offset: -1, last: true, pageSize: pageSize)
             } else if slot == model.pages.count + 1 {
-                chapterBoundary(title: "下一章")
+                crossChapterPage(offset: 1, last: false, pageSize: pageSize)
             } else {
                 let index = slot - 1
                 let page = model.pages.indices.contains(index)
@@ -680,6 +680,55 @@ struct ReaderView: View {
         }
 
         model.pageIndex = max(0, min(index - 1, pageCount - 1))
+    }
+
+    /// 邻章的真实页面(用于无缝翻章,替代"继续滑动"占位页)
+    @ViewBuilder
+    private func crossChapterPage(offset: Int, last: Bool, pageSize: CGSize) -> some View {
+        let preview = model.previewPage(offset: offset,
+                                        last: last,
+                                        size: pageSize,
+                                        attributes: settings.textAttributes)
+        let title = model.chapterTitle(offset: offset) ?? ""
+
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .font(.system(size: max(10, settings.fontSize / 2)))
+                    .lineLimit(1)
+                Spacer()
+            }
+            .foregroundStyle(settings.theme.secondaryColor)
+            .padding(.horizontal, settings.margin)
+            .frame(height: 26)
+
+            Spacer().frame(height: 10)
+
+            if let preview {
+                CoreTextPage(attributedText: preview,
+                             highlightRange: nil,
+                             highlightColor: highlightColor,
+                             onSingleTap: { _ in },
+                             onDoubleTap: { _ in })
+                    .frame(width: pageSize.width, height: pageSize.height)
+            } else {
+                Color.clear.frame(width: pageSize.width, height: pageSize.height)
+            }
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Text("—")
+                Spacer()
+                Text(Date(), style: .time)
+                    .monospacedDigit()
+            }
+            .font(.system(size: max(9, settings.fontSize / 2)))
+            .foregroundStyle(settings.theme.secondaryColor)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 7)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func chapterBoundary(title: String) -> some View {

@@ -178,6 +178,40 @@ final class ReaderModel: ObservableObject {
         return NSAttributedString(string: chapter.text, attributes: attributes)
     }
 
+    // MARK: - 邻章预览(无缝翻章用)
+
+    private var previewCache: [String: NSAttributedString] = [:]
+
+    func chapterTitle(offset: Int) -> String? {
+        guard let document else { return nil }
+        let index = chapterIndex + offset
+        guard document.chapters.indices.contains(index) else { return nil }
+        return document.chapters[index].title
+    }
+
+    /// 取相邻章节的首页/末页,作为翻页的目标页(不再是"继续滑动"占位)
+    func previewPage(offset: Int,
+                     last: Bool,
+                     size: CGSize,
+                     attributes: [NSAttributedString.Key: Any]) -> NSAttributedString? {
+        guard let document, size.width > 1, size.height > 1 else { return nil }
+        let index = chapterIndex + offset
+        guard document.chapters.indices.contains(index) else { return nil }
+
+        let key = "\(index)-\(last)-\(Int(size.width))x\(Int(size.height))"
+        if let cached = previewCache[key] { return cached }
+
+        let attributed = NSAttributedString(string: document.chapters[index].text, attributes: attributes)
+        let ranges = Paginator.ranges(attributed: attributed, size: size)
+        guard let range = last ? ranges.last : ranges.first else { return nil }
+
+        let page = NSAttributedString(attributedString: attributed.attributedSubstring(from: range))
+        previewCache[key] = page
+        return page
+    }
+
+    func clearPreviewCache() { previewCache.removeAll() }
+
     // MARK: - 导航
 
     func goToChapter(_ index: Int) {
@@ -225,6 +259,7 @@ final class ReaderModel: ObservableObject {
             return
         }
         cachedChapterText = chapter.text
+        clearPreviewCache()
         rebuildPages(chapter: chapter, attributes: attributes, size: layoutSize)
         pageIndex = min(pageIndex, max(pages.count - 1, 0))
     }

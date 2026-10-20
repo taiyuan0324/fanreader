@@ -18,8 +18,8 @@ targets:
       path: Sources/Info.plist
       properties:
         CFBundleDisplayName: 翻页
-        CFBundleShortVersionString: "0.9.14"
-        CFBundleVersion: "40"
+        CFBundleShortVersionString: "0.9.15"
+        CFBundleVersion: "41"
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
