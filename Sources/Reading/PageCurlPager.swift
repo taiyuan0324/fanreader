@@ -11,8 +11,9 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
     private let count: Int
     private var index: Int
     private let paper: UIColor
-    private let makePage: (Int, CGSize) -> AnyView
+    private var makePage: (Int) -> AnyView
     private let onIndexChange: (Int) -> Void
+    private(set) var version: Int = -1
 
     private var curl: PageCurlController<PageCurlPagerController>?
     private var hosts: [Int: UIHostingController<AnyView>] = [:]
@@ -22,7 +23,7 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
     init(count: Int,
          index: Int,
          paper: UIColor,
-         makePage: @escaping (Int, CGSize) -> AnyView,
+         makePage: @escaping (Int) -> AnyView,
          onIndexChange: @escaping (Int) -> Void) {
         self.count = count
         self.index = index
@@ -30,6 +31,22 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
         self.makePage = makePage
         self.onIndexChange = onIndexChange
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// 内容变了(分页重建/换章/改字号):丢掉缓存的页面视图并重建当前页
+    func reload(makePage: @escaping (Int) -> AnyView, version: Int) {
+        guard version != self.version else { return }
+        self.version = version
+        self.makePage = makePage
+        for host in hosts.values {
+            host.willMove(toParent: nil)
+            host.view.removeFromSuperview()
+            host.removeFromParent()
+        }
+        hosts.removeAll()
+        shown = nil
+        curl?.invalidate()
+        show(index, notify: false)
     }
 
     @available(*, unavailable)
@@ -82,9 +99,12 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
 
     private func pageHost(at slot: Int) -> UIHostingController<AnyView> {
         if let cached = hosts[slot] { return cached }
-        let host = UIHostingController(rootView: makePage(slot, view.bounds.size))
+        let host = UIHostingController(rootView: makePage(slot))
         host.view.backgroundColor = paper
         host.view.frame = view.bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addChild(host)
+        host.didMove(toParent: self)
         hosts[slot] = host
         return host
     }
@@ -138,19 +158,32 @@ struct PageCurlPager: UIViewControllerRepresentable {
     let count: Int
     @Binding var index: Int
     let paper: UIColor
-    let makePage: (Int, CGSize) -> AnyView
+    /// 内容变更令牌:页数 + 章节 + 排版尺寸,任一变化都要重建页面视图
+    let version: Int
+    let makePage: (Int) -> AnyView
 
     func makeUIViewController(context: Context) -> PageCurlPagerController {
-        PageCurlPagerController(count: count,
-                                index: index,
-                                paper: paper,
-                                makePage: makePage,
-                                onIndexChange: { newValue in
+        let controller = PageCurlPagerController(count: count,
+                                                 index: index,
+                                                 paper: paper,
+                                                 makePage: makePage,
+                                                 onIndexChange: { newValue in
             if index != newValue { index = newValue }
         })
+        // 首次进入也走一次 reload,确保用最新闭包
+        context.coordinator.version = version
+        return controller
     }
 
     func updateUIViewController(_ controller: PageCurlPagerController, context: Context) {
+        if controller.version != version || context.coordinator.version != version {
+            context.coordinator.version = version
+            controller.reload(makePage: makePage, version: version)
+        }
         controller.syncExternal(index: index)
     }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    final class Coordinator { var version = -1 }
 }

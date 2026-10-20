@@ -141,10 +141,8 @@ struct ReaderView: View {
                     PageCurlPager(count: model.pages.count + 2,
                                   index: $displayIndex,
                                   paper: settings.theme.uiBackground,
-                                  makePage: { slot, size in
-                                      AnyView(slotView(slot, pageSize: CGSize(width: max(size.width - settings.margin * 2, 80),
-                                                                               height: max(size.height - 82, 80))))
-                                  })
+                                  version: pagerVersion(pageSize: pageSize),
+                                  makePage: { slot in AnyView(slotView(slot, pageSize: pageSize)) })
                 } else {
                     TabView(selection: $displayIndex) {
                         ForEach(0..<(model.pages.count + 2), id: \.self) { slot in
@@ -683,6 +681,18 @@ struct ReaderView: View {
         }
 
         model.pageIndex = max(0, min(index - 1, pageCount - 1))
+    }
+
+    /// 翻页内容版本号:章节/页数/尺寸/字号/主题任一变化就重建页面视图
+    private func pagerVersion(pageSize: CGSize) -> Int {
+        var hasher = Hasher()
+        hasher.combine(model.chapterIndex)
+        hasher.combine(model.pages.count)
+        hasher.combine(Int(pageSize.width))
+        hasher.combine(Int(pageSize.height))
+        hasher.combine(Int(settings.fontSize * 10))
+        hasher.combine(settings.theme.rawValue)
+        return hasher.finalize()
     }
 
     /// 邻章的真实页面(用于无缝翻章,替代"继续滑动"占位页)
