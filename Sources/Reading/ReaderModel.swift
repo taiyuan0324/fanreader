@@ -233,6 +233,13 @@ final class ReaderModel: ObservableObject {
 
     var chapterText: String { currentChapter?.text ?? "" }
 
+    /// 全书进度(跨章累计),用于页脚右侧显示
+    var bookProgress: Double {
+        guard chapterCount > 0 else { return 0 }
+        let base = Double(chapterIndex) / Double(chapterCount)
+        return min(1, base + progress / Double(chapterCount))
+    }
+
     /// 页内字符下标 → 章节绝对偏移
     func absoluteOffset(pageIndex: Int, charIndex: Int) -> Int? {
         guard pageRanges.indices.contains(pageIndex) else { return nil }

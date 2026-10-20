@@ -39,6 +39,7 @@ struct ReaderView: View {
             settings.theme.background.ignoresSafeArea()
             content
             chrome
+            floatingListen
             toastOverlay
         }
         .overlay(alignment: .leading) { backEdge }
@@ -125,6 +126,7 @@ struct ReaderView: View {
 
             Group {
                 if settings.pageMode == .curl {
+                    // 全屏容器:卷页效果覆盖整页;边距由页面内容自己留
                     CurlPager(count: model.pages.count + 2,
                               index: $displayIndex,
                               pageBackground: settings.theme.uiBackground,
@@ -139,9 +141,7 @@ struct ReaderView: View {
                     .tabViewStyle(.page(indexDisplayMode: .never))
                 }
             }
-            .padding(.horizontal, settings.margin)
-            .padding(.top, 14)
-            .padding(.bottom, 46)
+            .frame(width: proxy.size.width, height: proxy.size.height)
             .onAppear { relayout(pageSize: pageSize) }
             .onChange(of: proxy.size) { newValue in
                 let insets = pageInsets(full: newValue)
@@ -172,40 +172,48 @@ struct ReaderView: View {
     /// 单个槽位:0 = 上一章占位,count+1 = 下一章占位,其余是正文页
     @ViewBuilder
     private func slotView(_ slot: Int, pageSize: CGSize) -> some View {
-        if model.pages.isEmpty {
-            // 分页还没完成:先给个空白页,别把槽位误判成跨章过渡页
-            Color.clear
-                .frame(width: pageSize.width, height: pageSize.height)
-        } else if slot == 0 {
-            chapterBoundary(title: "上一章")
-        } else if slot == model.pages.count + 1 {
-            chapterBoundary(title: "下一章")
-        } else {
-            let index = slot - 1
-            let page = model.pages.indices.contains(index)
-                ? model.pages[index]
-                : NSAttributedString(string: "")
+        ZStack {
+            settings.theme.background
 
-            CoreTextPage(
-                attributedText: page,
-                highlightRange: localHighlight(pageIndex: index),
-                highlightColor: highlightColor,
-                onSingleTap: { fraction in
-                    if fraction < 0.3 {
-                        model.previousPage()
-                    } else if fraction > 0.7 {
-                        model.nextPage()
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() }
-                    }
-                },
-                onDoubleTap: { charIndex in
-                    guard isListening else { return }
-                    startSpeech(fromPage: index, charIndex: charIndex)
+            if model.pages.isEmpty {
+                Color.clear
+            } else if slot == 0 {
+                chapterBoundary(title: "上一章")
+            } else if slot == model.pages.count + 1 {
+                chapterBoundary(title: "下一章")
+            } else {
+                let index = slot - 1
+                let page = model.pages.indices.contains(index)
+                    ? model.pages[index]
+                    : NSAttributedString(string: "")
+
+                VStack(spacing: 0) {
+                    Spacer().frame(height: 10)
+                    CoreTextPage(
+                        attributedText: page,
+                        highlightRange: localHighlight(pageIndex: index),
+                        highlightColor: highlightColor,
+                        onSingleTap: { fraction in
+                            if fraction < 0.3 {
+                                model.previousPage()
+                            } else if fraction > 0.7 {
+                                model.nextPage()
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.2)) { chromeVisible.toggle() }
+                            }
+                        },
+                        onDoubleTap: { charIndex in
+                            guard isListening else { return }
+                            startSpeech(fromPage: index, charIndex: charIndex)
+                        }
+                    )
+                    .frame(width: pageSize.width, height: pageSize.height)
+                    Spacer(minLength: 0)
                 }
-            )
-            .frame(width: pageSize.width, height: pageSize.height, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var scrollingContent: some View {
@@ -227,7 +235,8 @@ struct ReaderView: View {
 
     /// 页眉页脚占用的高度,分页时要扣掉,否则最后一页会被裁
     private func pageInsets(full: CGSize) -> CGFloat {
-        let chrome: CGFloat = 46
+        // 页眉 26 + 页脚 46 + 顶部留白 10
+        let chrome: CGFloat = 82
         return full.height * 0.02 + chrome
     }
 
@@ -236,6 +245,9 @@ struct ReaderView: View {
     @ViewBuilder
     private var chrome: some View {
         VStack(spacing: 0) {
+            if settings.showHeaderFooter {
+                headerBar
+            }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -251,13 +263,8 @@ struct ReaderView: View {
             if chromeVisible {
                 // 顶部:听书态左侧胶囊 / 阅读态右侧「听」
                 HStack {
-                    if isListening {
-                        listeningPill
-                    }
+                    if isListening { listeningPill }
                     Spacer()
-                    if !isListening {
-                        listenCircle
-                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -394,27 +401,28 @@ struct ReaderView: View {
         .buttonStyle(.plain)
     }
 
-    /// 常驻页脚:页码 — 播放胶囊 — 时间电量
+    /// 常驻页脚:页码 / 播放胶囊(居中) / 时间 + 全书进度
     private var statusFooter: some View {
-        HStack(spacing: 10) {
-            Text("\(model.currentPageNumber)/\(max(model.pageCount, 1))")
-                .font(.system(size: 12))
-                .monospacedDigit()
-                .foregroundStyle(settings.theme.secondaryColor)
-
-            Spacer(minLength: 6)
-
-            footerPill
-
-            Spacer(minLength: 6)
-
-            HStack(spacing: 5) {
-                Text(Date(), style: .time)
+        ZStack {
+            HStack(spacing: 8) {
+                Text("\(model.currentPageNumber)/\(max(model.pageCount, 1))")
                     .font(.system(size: 12))
                     .monospacedDigit()
-                BatteryLabel()
+
+                Spacer(minLength: 90)
+
+                HStack(spacing: 8) {
+                    Text(Date(), style: .time)
+                        .font(.system(size: 12))
+                        .monospacedDigit()
+                    Text("\(Int(model.bookProgress * 100))%")
+                        .font(.system(size: 12))
+                        .monospacedDigit()
+                }
             }
             .foregroundStyle(settings.theme.secondaryColor)
+
+            footerPill
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
@@ -477,7 +485,37 @@ struct ReaderView: View {
         settings.theme = isDark ? .paper : .dark
     }
 
+    /// 页眉:左侧章节名(字号为正文一半)
+    private var headerBar: some View {
+        HStack {
+            Text(model.chapterTitle)
+                .font(.system(size: max(10, settings.fontSize / 2)))
+                .lineLimit(1)
+            Spacer()
+        }
+        .foregroundStyle(settings.theme.secondaryColor)
+        .padding(.horizontal, settings.margin)
+        .frame(height: 26)
+        .allowsHitTesting(false)
+    }
+
     // MARK: - 悬浮球 / 手势 / 提示
+
+    /// 阅读态右上角独立的悬浮「听」按钮(挂在功能区之外)
+    @ViewBuilder
+    private var floatingListen: some View {
+        VStack {
+            HStack {
+                Spacer()
+                if !isListening {
+                    listenCircle
+                        .padding(.trailing, 18)
+                        .padding(.top, 4)
+                }
+            }
+            Spacer()
+        }
+    }
 
     @ViewBuilder
     private var toastOverlay: some View {
