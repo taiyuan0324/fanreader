@@ -12,7 +12,7 @@ struct ReaderView: View {
     @StateObject private var model: ReaderModel
     @StateObject private var speech = SpeechController()
 
-    @State private var chromeVisible = true
+    @State private var chromeVisible = false
     /// 听书态:与阅读态互斥,避免阅读时误触朗读
     @State private var isListening = false
     /// TabView 下标 = 正文页 + 首尾两个跨章占位页
@@ -163,7 +163,11 @@ struct ReaderView: View {
     /// 单个槽位:0 = 上一章占位,count+1 = 下一章占位,其余是正文页
     @ViewBuilder
     private func slotView(_ slot: Int, pageSize: CGSize) -> some View {
-        if slot == 0 {
+        if model.pages.isEmpty {
+            // 分页还没完成:先给个空白页,别把槽位误判成跨章过渡页
+            Color.clear
+                .frame(width: pageSize.width, height: pageSize.height)
+        } else if slot == 0 {
             chapterBoundary(title: "上一章")
         } else if slot == model.pages.count + 1 {
             chapterBoundary(title: "下一章")

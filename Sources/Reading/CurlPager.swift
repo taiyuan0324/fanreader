@@ -51,9 +51,17 @@ struct CurlPager: UIViewControllerRepresentable {
 
     func updateUIViewController(_ pager: UIPageViewController, context: Context) {
         let coordinator = context.coordinator
+        let countChanged = coordinator.count != count
         coordinator.count = count
         coordinator.background = pageBackground
         coordinator.content = content
+
+        // 页数变了(首次分页完成/换章)时,必须重建当前页,否则会停留旧内容
+        if countChanged, let controller = coordinator.controller(for: index) {
+            coordinator.currentIndex = index
+            pager.setViewControllers([controller], direction: .forward, animated: false)
+            return
+        }
 
         guard coordinator.currentIndex != index,
               let controller = coordinator.controller(for: index) else { return }
