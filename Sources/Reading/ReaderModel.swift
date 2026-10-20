@@ -270,9 +270,9 @@ final class ReaderModel: ObservableObject {
     /// 整章分页 + 邻章预览全部在后台算,主线程只收 NSRange 与成品子串
     private func schedulePagination(chapter: Chapter) {
         paginationTask?.cancel()
-        guard let size = layoutSize,
-              let attributes = layoutAttributes,
-              size.width > 1, size.height > 1 else { return }
+        guard layoutSize != .zero,
+              let attributes = layoutAttributes else { return }
+        let size = layoutSize
 
         let previousIndex = pageIndex
         let keepPage = keepPageAfterPagination
