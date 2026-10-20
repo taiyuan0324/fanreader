@@ -142,7 +142,7 @@ struct ReaderView: View {
                                   index: $displayIndex,
                                   paper: settings.theme.uiBackground,
                                   version: pagerVersion(pageSize: pageSize),
-                                  makePage: { slot in AnyView(slotView(slot, pageSize: pageSize)) })
+                                  makePage: { slot in AnyView(slotView(slot, pageSize: pageSize, tapZonesEnabled: false)) })
                 } else {
                     TabView(selection: $displayIndex) {
                         ForEach(0..<(model.pages.count + 2), id: \.self) { slot in
@@ -183,7 +183,7 @@ struct ReaderView: View {
 
     /// 单个槽位:0 = 上一章占位,count+1 = 下一章占位,其余是正文页
     @ViewBuilder
-    private func slotView(_ slot: Int, pageSize: CGSize) -> some View {
+    private func slotView(_ slot: Int, pageSize: CGSize, tapZonesEnabled: Bool = true) -> some View {
         ZStack {
             settings.theme.background
 

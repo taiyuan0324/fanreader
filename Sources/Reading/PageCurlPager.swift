@@ -5,7 +5,7 @@ import PageCurlKit
 /// 基于 PageCurlKit(Metal)的真卷页。
 /// 宿主只负责:给出当前页/相邻页的视图、显示目标页,卷页动画交给库。
 @MainActor
-final class PageCurlPagerController: UIViewController, PageCurlHost {
+final class PageCurlPagerController: UIViewController, PageCurlHost, UIGestureRecognizerDelegate {
     typealias Position = Int
 
     private let count: Int
@@ -62,6 +62,10 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
 
         show(index, notify: false)
 
+        // 关键:库会在容器里插一个铺满全屏的 sizeSentinel,叠在页面之上,
+        // 不禁用交互的话,所有触摸都会被它吃掉(单击/滑动全部失效)
+        disableNonPageInteraction()
+
         let left = UISwipeGestureRecognizer(target: self, action: #selector(swipeLeft))
         left.direction = .left
         view.addGestureRecognizer(left)
@@ -69,6 +73,45 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
         let right = UISwipeGestureRecognizer(target: self, action: #selector(swipeRight))
         right.direction = .right
         view.addGestureRecognizer(right)
+
+        // 单击左右 30% 区域 = 带卷页动画翻页;双击留给 SwiftUI(定位朗读)
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.delegate = self
+        view.addGestureRecognizer(tap)
+    }
+
+    private var lastTapTime: Date = .distantPast
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        let now = Date()
+        let isDouble = now.timeIntervalSince(lastTapTime) < 0.28
+        lastTapTime = now
+        // 第二击交给 SwiftUI 的双击手势(定位朗读),这里不翻页
+        if isDouble { return }
+
+        let location = gesture.location(in: view)
+        let fraction = view.bounds.width > 1 ? location.x / view.bounds.width : 0.5
+        if fraction < 0.3 {
+            curl?.turn(forward: false, isSpread: false)
+        } else if fraction > 0.7 {
+            curl?.turn(forward: true, isSpread: false)
+        }
+        // 中间 40% 不处理:单击呼出/收起工具条由 SwiftUI 处理
+    }
+
+    private func disableNonPageInteraction() {
+        let pageViews = hosts.values.map { ObjectIdentifier($0.view) }
+            + (shown.map { [ObjectIdentifier($0.view)] } ?? [])
+        for subview in view.subviews {
+            if !pageViews.contains(ObjectIdentifier(subview)) {
+                subview.isUserInteractionEnabled = false
+            }
+        }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        true
     }
 
     override func viewDidLayoutSubviews() {
@@ -79,6 +122,7 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
         shown = nil
         curl?.invalidate()
         show(index, notify: false)
+        disableNonPageInteraction()
     }
 
     @objc private func swipeLeft() {
@@ -119,6 +163,7 @@ final class PageCurlPagerController: UIViewController, PageCurlHost {
             shown = host
         }
         index = clamped
+        disableNonPageInteraction()
         curl?.prefetch()
         if notify { onIndexChange(clamped) }
     }
