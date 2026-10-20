@@ -53,6 +53,8 @@ struct ReaderView: View {
             toastOverlay
         }
         .animation(.easeInOut(duration: 0.2), value: chromeVisible)
+        .onAppear { applyWindowBackground() }
+        .onChange(of: settings.theme) { _ in applyWindowBackground() }
         .overlay(alignment: .leading) { backEdge }
         .simultaneousGesture(pullDownBookmarkGesture)
         .navigationBarBackButtonHidden(true)
@@ -486,6 +488,14 @@ struct ReaderView: View {
     private func toggleNightMode() {
         let isDark = settings.theme == .dark || settings.theme == .black
         settings.theme = isDark ? .paper : .dark
+    }
+
+    /// 窗口底色跟随主题:安全区/过渡区域不再出现黑边
+    private func applyWindowBackground() {
+        let color = UIColor(settings.theme.background)
+        for scene in UIApplication.shared.connectedScenes {
+            (scene as? UIWindowScene)?.windows.forEach { $0.backgroundColor = color }
+        }
     }
 
     /// 页眉:左侧章节名(字号为正文一半)

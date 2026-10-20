@@ -31,6 +31,12 @@ final class PageCurlPagerController: UIViewController, PageCurlHost, UIGestureRe
         self.makePage = makePage
         self.onIndexChange = onIndexChange
         super.init(nibName: nil, bundle: nil)
+
+        var config = PageCurlConfiguration()
+        config.duration = 0.32                 // 默认 0.45,偏拖沓
+        config.shadowStrength = 0.22           // 压暗收敛,别盖过正文
+        config.backMirrorOpacity = 0.25
+        self.configuration = config
     }
 
     /// 内容变了(分页重建/换章/改字号):丢掉缓存的页面视图并重建当前页
