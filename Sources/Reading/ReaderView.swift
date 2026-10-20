@@ -39,7 +39,6 @@ struct ReaderView: View {
             settings.theme.background.ignoresSafeArea()
             content
             chrome
-            floatingListen
             toastOverlay
         }
         .overlay(alignment: .leading) { backEdge }
@@ -188,6 +187,7 @@ struct ReaderView: View {
                     : NSAttributedString(string: "")
 
                 VStack(spacing: 0) {
+                    headerBar
                     Spacer().frame(height: 10)
                     CoreTextPage(
                         attributedText: page,
@@ -209,6 +209,7 @@ struct ReaderView: View {
                     )
                     .frame(width: pageSize.width, height: pageSize.height)
                     Spacer(minLength: 0)
+                    statusFooter
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -245,9 +246,6 @@ struct ReaderView: View {
     @ViewBuilder
     private var chrome: some View {
         VStack(spacing: 0) {
-            if settings.showHeaderFooter {
-                headerBar
-            }
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -261,14 +259,15 @@ struct ReaderView: View {
     private var bottomBar: some View {
         VStack(spacing: 0) {
             if chromeVisible {
-                // 顶部:听书态左侧胶囊 / 阅读态右侧「听」
+                // 悬浮按钮行:距功能区约两行行距
                 HStack {
                     if isListening { listeningPill }
                     Spacer()
+                    if !isListening { listenCircle }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 6)
+                .padding(.bottom, max(28, settings.fontSize * 2))
 
                 chapterSlider
                     .padding(.horizontal, 18)
@@ -291,9 +290,10 @@ struct ReaderView: View {
         Button { toggleListening() } label: {
             Text("听")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(pillColor)
                 .frame(width: 58, height: 58)
-                .background(Circle().fill(pillColor))
+                .background(Circle().fill(.ultraThinMaterial))
+                .overlay(Circle().stroke(pillColor.opacity(0.25), lineWidth: 0.8))
         }
         .buttonStyle(.plain)
     }
@@ -303,14 +303,14 @@ struct ReaderView: View {
         HStack(spacing: 10) {
             Text(String(model.book.title.prefix(1)))
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(pillColor)
                 .frame(width: 30, height: 30)
-                .background(Circle().fill(Color.white.opacity(0.25)))
+                .background(Circle().fill(pillColor.opacity(0.12)))
 
             Button { toggleSpeech() } label: {
                 Image(systemName: speech.isSpeaking ? "pause.fill" : "play.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(pillColor)
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
@@ -318,14 +318,15 @@ struct ReaderView: View {
             Button { stopListening() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(pillColor.opacity(0.9))
                     .frame(width: 24, height: 24)
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(Capsule().fill(pillColor.opacity(0.92)))
+        .background(Capsule().fill(.ultraThinMaterial))
+        .overlay(Capsule().stroke(pillColor.opacity(0.22), lineWidth: 0.8))
     }
 
     /// 上一章 —— 胶囊进度 —— 下一章
@@ -500,22 +501,6 @@ struct ReaderView: View {
     }
 
     // MARK: - 悬浮球 / 手势 / 提示
-
-    /// 阅读态右上角独立的悬浮「听」按钮(挂在功能区之外)
-    @ViewBuilder
-    private var floatingListen: some View {
-        VStack {
-            HStack {
-                Spacer()
-                if !isListening {
-                    listenCircle
-                        .padding(.trailing, 18)
-                        .padding(.top, 4)
-                }
-            }
-            Spacer()
-        }
-    }
 
     @ViewBuilder
     private var toastOverlay: some View {
@@ -1027,25 +1012,88 @@ struct ReaderSettingsSheet: View {
                 }
 
                 Section("听书") {
-                    HStack {
-                        Text("引擎")
-                        Spacer()
-                        Text(tts.kind.name).foregroundStyle(.secondary)
+                    Picker("引擎", selection: $tts.kind) {
+                        ForEach(TTSProviderKind.allCases) { kind in
+                            Text(kind.name).tag(kind)
+                        }
                     }
-                    HStack {
-                        Text("状态")
-                        Spacer()
-                        Text(tts.isConfigured ? "已配置" : "未配置(将用系统语音)")
-                            .foregroundStyle(tts.isConfigured ? .green : .orange)
+
+                    switch tts.kind {
+                    case .doubao:
+                        TextField("服务地址", text: $tts.doubaoBaseURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                        if tts.doubaoSpeakers.isEmpty {
+                            TextField("音色(如 温柔桃子)", text: $tts.doubaoSpeaker)
+                                .textInputAutocapitalization(.never)
+                        } else {
+                            Picker("音色", selection: $tts.doubaoSpeaker) {
+                                ForEach(tts.doubaoSpeakers, id: \.self) { name in
+                                    Text(name).tag(name)
+                                }
+                            }
+                        }
+                        Button("检测并拉取音色") {
+                            Task { await tts.probeDoubao() }
+                        }
+                        Text(tts.doubaoStatus)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                    case .edgeServer:
+                        TextField("服务地址", text: $tts.edgeServerBaseURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                        SecureField("TOKEN(没设就留空)", text: $tts.edgeServerToken)
+                            .textInputAutocapitalization(.never)
+                        if tts.edgeServerVoices.isEmpty {
+                            TextField("音色(如 zh-CN-XiaoxiaoNeural)", text: $tts.edgeServerVoice)
+                                .textInputAutocapitalization(.never)
+                        } else {
+                            Picker("音色", selection: $tts.edgeServerVoice) {
+                                ForEach(tts.edgeServerVoices, id: \.self) { name in
+                                    Text(EdgeVoiceNames.friendly(name)).tag(name)
+                                }
+                            }
+                        }
+                        Button("检测并拉取音色") {
+                            Task { await tts.probeEdgeServer() }
+                        }
+                        Text(tts.edgeServerStatus)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                    case .system:
+                        Picker("系统音色", selection: $tts.systemVoice) {
+                            Text("自动(优先高级/增强)").tag("")
+                            ForEach(SystemVoiceCatalog.chineseVoices()) { voice in
+                                Text(voice.displayName).tag(voice.id)
+                            }
+                        }
+
+                    case .azure:
+                        TextField("区域(eastasia)", text: $tts.azureRegion)
+                            .textInputAutocapitalization(.never)
+                        TextField("语音(zh-CN-XiaoxiaoNeural)", text: $tts.azureVoice)
+                            .textInputAutocapitalization(.never)
+                        SecureField("订阅密钥", text: $tts.azureKey)
+
+                    case .openAICompatible:
+                        TextField("Base URL", text: $tts.openAIBaseURL)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                        TextField("模型", text: $tts.openAIModel)
+                        TextField("音色", text: $tts.openAIVoice)
+                        SecureField("API Key", text: $tts.openAIKey)
                     }
+
                     sliderRow(title: "倍速", value: $settings.speechRateMultiplier,
                               range: 1.0...3.0, step: 0.1, format: "%.1f×")
                     sliderRow(title: "预缓存段数", value: $settings.prefetchCount,
                               range: 5...15, step: 1, format: "%.0f 段")
                     Toggle("读完自动翻页", isOn: $settings.autoTurnPageOnSpeech)
-                    Text("在线语音在 设置 → 语音合成 里配置")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
                 }
 
                 Section("翻页") {
