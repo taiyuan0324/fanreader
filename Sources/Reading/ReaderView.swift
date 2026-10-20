@@ -48,6 +48,16 @@ struct ReaderView: View {
         .statusBarHidden(!chromeVisible)
         .preferredColorScheme(colorScheme)
         .task { await model.load() }
+        .onAppear {
+            // 调试:截图用,不影响正常使用
+            let arguments = ProcessInfo.processInfo.arguments
+            if arguments.contains("-chrome") { chromeVisible = true }
+            if arguments.contains("-listen") {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    if !isListening { toggleListening() }
+                }
+            }
+        }
         .onDisappear { persist() }
         .onChange(of: speech.currentRange) { _ in
             followCurrentRange()
