@@ -179,7 +179,8 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
 
     private func activateSession() async {
         let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+        // 听书独占音频,不去压低/混合其它 App 的声音
+        try? session.setCategory(.playback, mode: .spokenAudio, options: [])
         try? session.setActive(true)
     }
 
