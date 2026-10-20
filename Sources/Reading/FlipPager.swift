@@ -44,6 +44,13 @@ struct FlipPager: View {
             .frame(width: proxy.size.width, height: proxy.size.height)
             .clipped()
             .contentShape(Rectangle())
+            .onAppear {
+                // 截图调试:定格在翻页中途
+                if ProcessInfo.processInfo.arguments.contains("-flipMid") {
+                    forward = true
+                    progress = 0.45
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in

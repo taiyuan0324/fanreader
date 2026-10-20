@@ -91,6 +91,7 @@ jobs:
           SHOT=05-reader-curl shot -seedDemo -openFirstBook -pageMode curl
           SHOT=06-reader-chrome shot -seedDemo -openFirstBook -chrome
           SHOT=07-reader-listen shot -seedDemo -openFirstBook -chrome -listen
+          SHOT=08-reader-flip shot -seedDemo -openFirstBook -pageMode curl -flipMid
           ls -la shots
           echo "--- import log ---"
           xcrun simctl get_app_container booted com.example.fanreader data > /tmp/appdir.txt 2>/dev/null || true
