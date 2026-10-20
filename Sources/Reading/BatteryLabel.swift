@@ -12,9 +12,11 @@ struct BatteryLabel: View {
         HStack(spacing: 3) {
             Image(systemName: charging ? "battery.100.bolt" : iconName)
                 .font(.system(size: 11))
-            Text(text)
-                .font(.system(size: 10))
-                .monospacedDigit()
+            if level >= 0 {
+                Text(text)
+                    .font(.system(size: 10))
+                    .monospacedDigit()
+            }
         }
         .onAppear {
             UIDevice.current.isBatteryMonitoringEnabled = true

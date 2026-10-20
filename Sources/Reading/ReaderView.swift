@@ -452,9 +452,10 @@ struct ReaderView: View {
     @ViewBuilder
     private var floatingBall: some View {
         HStack {
-            if !isListening { ballContent.padding(.leading, 10) }
+            // 半挂在屏幕边缘,避免压住正文
+            if !isListening { ballContent.padding(.leading, -16) }
             Spacer()
-            if isListening { ballContent.padding(.trailing, 10) }
+            if isListening { ballContent.padding(.trailing, -16) }
         }
         .frame(maxHeight: .infinity)
     }
