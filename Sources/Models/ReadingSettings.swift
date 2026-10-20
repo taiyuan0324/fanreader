@@ -221,6 +221,12 @@ final class ReadingSettings: ObservableObject {
         alignment = ReaderTextAlignment(rawValue: defaults.string(forKey: Key.alignment.rawValue) ?? "") ?? .justified
         // 默认仿真翻页
         pageMode = ReaderPageMode(rawValue: defaults.string(forKey: Key.pageMode.rawValue) ?? "") ?? .curl
+
+        // 一次性迁移:老版本默认是左右翻页,升级后统一改用仿真翻页
+        if !defaults.bool(forKey: "migrated.curlMode") {
+            if pageMode == .slide { pageMode = .curl }
+            defaults.set(true, forKey: "migrated.curlMode")
+        }
         showHeaderFooter = defaults.object(forKey: Key.showChrome.rawValue) as? Bool ?? true
         speechRateMultiplier = defaults.object(forKey: Key.speechRate.rawValue) as? Double ?? 1.0
         prefetchCount = defaults.object(forKey: Key.prefetch.rawValue) as? Double ?? 10
