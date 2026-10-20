@@ -27,6 +27,8 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
     @Published private(set) var currentRange: NSRange?
     /// 服务端实际使用的引擎(豆包可能被降级成微软)
     @Published private(set) var servedEngine: String = ""
+    /// 已暂停但可以原地继续
+    @Published private(set) var isPaused = false
 
     var onError: ((Error) -> Void)?
     var onRemoteNextChapter: (() -> Void)?
@@ -164,21 +166,53 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
         speakNextSystemChunk()
     }
 
-    /// 暂停(保留锁屏控制器,可远程继续)
+    /// 暂停(保留播放器与锁屏控制器,可原地继续)
     func pause() {
+        guard isSpeaking else { return }
         pausedRange = currentRange
         isSpeaking = false
-        OnlineSpeechReader.shared.stop()
-        systemActive = false
+        isPaused = true
+
+        OnlineSpeechReader.shared.pausePlayback()
         if synthesizer.isSpeaking {
-            synthesizer.stopSpeaking(at: .immediate)
+            synthesizer.pauseSpeaking(at: .word)
         }
-        NowPlayingCenter.shared.update(elapsed: Double(chunkLocations.firstIndex(of: pausedRange?.location ?? -1) ?? 0),
+
+        NowPlayingCenter.shared.update(elapsed: Double(currentChunkIndex),
                                        total: max(chunkLocations.count, 1),
                                        isPlaying: false)
     }
 
+    /// 从暂停处继续
+    func resume() {
+        guard isPaused else { return }
+        isPaused = false
+        isSpeaking = true
+
+        if OnlineSpeechReader.shared.hasActiveTask {
+            OnlineSpeechReader.shared.resumePlayback()
+        } else if synthesizer.isPaused {
+            synthesizer.continueSpeaking()
+        } else if !lastText.isEmpty, let config = lastConfig {
+            speakChapter(lastText, from: pausedRange?.location ?? 0, config: config)
+        }
+
+        NowPlayingCenter.shared.update(elapsed: Double(currentChunkIndex),
+                                       total: max(chunkLocations.count, 1),
+                                       isPlaying: true)
+    }
+
+    private var currentChunkIndex: Int {
+        guard let location = (pausedRange ?? currentRange)?.location,
+              let index = chunkLocations.firstIndex(of: location) else { return 0 }
+        return index
+    }
+
     private func resumeFromRemote() {
+        if isPaused {
+            resume()
+            return
+        }
         guard !isSpeaking, !lastText.isEmpty, let config = lastConfig else { return }
         let offset = pausedRange?.location ?? 0
         pausedRange = nil
@@ -194,7 +228,9 @@ final class SpeechController: NSObject, ObservableObject, AVSpeechSynthesizerDel
     func stop() {
         NowPlayingCenter.shared.deactivate()
         pausedRange = nil
+        isPaused = false
         OnlineSpeechReader.shared.stop()
+        OnlineSpeechReader.shared.deactivateSession()
         systemActive = false
         systemChunks = []
         systemIndex = 0

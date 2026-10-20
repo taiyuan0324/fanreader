@@ -69,6 +69,10 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
     private var buffer: AudioBuffer?
 
     private(set) var isPlaying = false
+    /// 播放器处于暂停(任务仍存活,可原地继续)
+    private(set) var isPaused = false
+    /// 是否还有朗读任务在跑(含暂停)
+    var hasActiveTask: Bool { task != nil }
     var onError: ((Error) -> Void)?
 
     func play(chunks: [SpeechChunk],
@@ -155,6 +159,26 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    /// 暂停:保留播放器与任务,继续时原地接着播
+    func pausePlayback() {
+        isPaused = true
+        player?.pause()
+        isPlaying = false
+    }
+
+    func resumePlayback() {
+        isPaused = false
+        if let player {
+            player.play()
+            isPlaying = true
+        }
+    }
+
+    /// 只在真正结束后才交还音频会话(交给别的 App)
+    func deactivateSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+    }
+
     func playOnce(_ data: Data) async {
         stop()
         await activateSession()
@@ -162,6 +186,7 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
     }
 
     func stop() {
+        isPaused = false
         task?.cancel()
         task = nil
         if let buffer {
@@ -198,8 +223,15 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
             audio.rate = Float(min(max(rate, 1.0), 3.0))
         }
         audio.prepareToPlay()
-        audio.play()
         player = audio
+
+        // 用户已暂停时不要偷偷开播
+        while isPaused, !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 150_000_000)
+        }
+        if Task.isCancelled { return }
+
+        audio.play()
         isPlaying = true
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -210,7 +242,8 @@ final class OnlineSpeechReader: NSObject, AVAudioPlayerDelegate {
     private func finish() {
         isPlaying = false
         player = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
+        // 注意:这里不能 setActive(false)。
+        // 每段结束就交还会话,会让后台音乐在我们朗读途中反复恢复。
     }
 
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {

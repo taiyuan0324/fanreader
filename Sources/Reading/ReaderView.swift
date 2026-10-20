@@ -762,6 +762,10 @@ struct ReaderView: View {
             speech.pause()
             return
         }
+        if speech.isPaused {
+            speech.resume()
+            return
+        }
         guard isListening else { return }
         speakChapter(from: currentPageStartOffset)
     }
