@@ -219,7 +219,8 @@ final class ReadingSettings: ObservableObject {
         fontFamily = ReaderFontFamily(rawValue: defaults.string(forKey: Key.fontFamily.rawValue) ?? "") ?? .system
         // 默认两端对齐:中文正文左右齐平,观感比左对齐整齐
         alignment = ReaderTextAlignment(rawValue: defaults.string(forKey: Key.alignment.rawValue) ?? "") ?? .justified
-        pageMode = ReaderPageMode(rawValue: defaults.string(forKey: Key.pageMode.rawValue) ?? "") ?? .slide
+        // 默认仿真翻页
+        pageMode = ReaderPageMode(rawValue: defaults.string(forKey: Key.pageMode.rawValue) ?? "") ?? .curl
         showHeaderFooter = defaults.object(forKey: Key.showChrome.rawValue) as? Bool ?? true
         speechRateMultiplier = defaults.object(forKey: Key.speechRate.rawValue) as? Double ?? 1.0
         prefetchCount = defaults.object(forKey: Key.prefetch.rawValue) as? Double ?? 10
