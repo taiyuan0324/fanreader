@@ -88,6 +88,7 @@ jobs:
           SHOT=02-reader-paper shot -seedDemo -openFirstBook
           SHOT=03-reader-dark shot -seedDemo -openFirstBook -theme dark
           SHOT=04-reader-cream-scroll shot -seedDemo -openFirstBook -theme cream -pageMode scroll
+          SHOT=05-reader-curl shot -seedDemo -openFirstBook -pageMode curl
           ls -la shots
           echo "--- import log ---"
           xcrun simctl get_app_container booted com.example.fanreader data > /tmp/appdir.txt 2>/dev/null || true
