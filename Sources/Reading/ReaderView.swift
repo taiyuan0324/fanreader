@@ -35,12 +35,24 @@ struct ReaderView: View {
     }
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             settings.theme.background.ignoresSafeArea()
             content
-            chrome
+
+            if chromeVisible {
+                // 正文上方淡遮罩,点击收起
+                Color.black.opacity(0.06)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) { chromeVisible = false }
+                    }
+                bottomBar
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             toastOverlay
         }
+        .animation(.easeInOut(duration: 0.2), value: chromeVisible)
         .overlay(alignment: .leading) { backEdge }
         .simultaneousGesture(pullDownBookmarkGesture)
         .navigationBarBackButtonHidden(true)
@@ -244,44 +256,33 @@ struct ReaderView: View {
     // MARK: - 页眉 / 页脚 / 工具条
 
     @ViewBuilder
-    private var chrome: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(false)
-        .overlay(alignment: .bottom) {
-            bottomBar
-        }
-        .animation(.easeInOut(duration: 0.2), value: chromeVisible)
-    }
-
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            if chromeVisible {
-                // 悬浮按钮行:距功能区约两行行距
-                HStack {
-                    if isListening { listeningPill }
-                    Spacer()
-                    if !isListening { listenCircle }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, max(28, settings.fontSize * 2))
+            // 悬浮按钮:在面板上方(红线上),不带背景
+            HStack {
+                if isListening { listeningPill }
+                Spacer()
+                if !isListening { listenCircle }
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, max(22, settings.fontSize * 1.4))
 
+            // 面板:从这里开始铺底色
+            VStack(spacing: 0) {
                 chapterSlider
                     .padding(.horizontal, 18)
-                    .padding(.bottom, 10)
+                    .padding(.top, 14)
+                    .padding(.bottom, 12)
 
                 tabRow
-                    .padding(.bottom, 6)
-            }
+                    .padding(.bottom, 4)
 
-            statusFooter
-        }
-        .background(settings.theme.background)
-        .overlay(alignment: .top) {
-            Divider().opacity(chromeVisible ? 0.5 : 0)
+                statusFooter
+            }
+            .background(settings.theme.background)
+            .overlay(alignment: .top) {
+                Divider().opacity(0.45)
+            }
         }
     }
 
@@ -653,6 +654,12 @@ struct ReaderView: View {
     private func handleDisplayIndexChange(_ index: Int) {
         let pageCount = model.pages.count
         if pageCount == 0 { return }
+
+        // 听书中翻到章边界:不切章,回弹(否则会打断朗读并跳到下一章)
+        if isListening, index == 0 || index == pageCount + 1 {
+            displayIndex = model.pageIndex + 1
+            return
+        }
 
         if index == 0 {
             guard model.chapterIndex > 0 else {

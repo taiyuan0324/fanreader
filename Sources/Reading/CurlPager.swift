@@ -36,6 +36,10 @@ struct CurlPager: UIViewControllerRepresentable {
         pager.isDoubleSided = false
         pager.view.backgroundColor = pageBackground
         pager.view.isOpaque = true
+        // 卷页容器必须铺满整屏,否则只会翻中间一块
+        pager.view.frame = UIScreen.main.bounds
+        pager.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        pager.view.clipsToBounds = true
 
         let coordinator = context.coordinator
         coordinator.onIndexChange = { newIndex in
@@ -50,6 +54,9 @@ struct CurlPager: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ pager: UIPageViewController, context: Context) {
+        if pager.view.frame != UIScreen.main.bounds {
+            pager.view.frame = UIScreen.main.bounds
+        }
         let coordinator = context.coordinator
         let countChanged = coordinator.count != count
         coordinator.count = count
