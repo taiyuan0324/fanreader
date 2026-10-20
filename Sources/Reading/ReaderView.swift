@@ -137,11 +137,11 @@ struct ReaderView: View {
 
             Group {
                 if settings.pageMode == .curl {
-                    // 全屏容器:卷页效果覆盖整页;边距由页面内容自己留
-                    CurlPager(count: model.pages.count + 2,
+                    // 自研双面翻转:整屏覆盖,正反面同色,阴影与玻璃高光可控
+                    FlipPager(count: model.pages.count + 2,
                               index: $displayIndex,
-                              pageBackground: settings.theme.uiBackground,
-                              content: { slot in AnyView(slotView(slot, pageSize: pageSize)) })
+                              content: { slot in AnyView(slotView(slot, pageSize: pageSize)) },
+                              pageBackground: settings.theme.background)
                 } else {
                     TabView(selection: $displayIndex) {
                         ForEach(0..<(model.pages.count + 2), id: \.self) { slot in
